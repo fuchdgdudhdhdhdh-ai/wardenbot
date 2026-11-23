@@ -1,0 +1,13 @@
+.venv
+__pycache__
+*.pyc
+*.db
+.env
+.git
+
+tmp/
+*.session
+*.sqlite
+*.sqlite3
+backups/
+warden.db

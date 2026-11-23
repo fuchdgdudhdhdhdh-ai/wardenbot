@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: warden-team-bot
+    runtime: python
+    plan: starter
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python bot.py
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: warden-team-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DATABASE_PATH
+        value: /var/data/warden.db
+      - key: LOG_LEVEL
+        value: INFO
+      - key: BOT_MODE
+        value: webhook
+      - key: ACCOUNT_LEASE_TTL_MIN
+        value: 30
+      - key: WEBHOOK_PATH
+        value: /telegram/webhook
+      - key: BOT_TOKEN
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: SESSION_ENC_KEY
+        sync: false
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: TEAM_CHAT_ID
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: SUPERADMIN_ID
+        sync: false
+      - key: TEAM_INVITE
+        sync: false

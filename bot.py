@@ -133,12 +133,18 @@ class AccessGuard(BaseMiddleware):
 
 
 async def send_home(target, user):
+    """Показывает меню; повреждённая картинка не должна ломать /start."""
     name = user.get("username") or user.get("first_name") or "участник"
     caption = (f"Привет, {name}! Это панель тимы «Warden Team». С помощью бота ты можешь взять ссылку, "
                "посмотреть статистику и запросить выплату. Нажимай кнопки ниже и пользуйся ботом.")
-    if not MAIN_MENU_PHOTO_PATH.is_file():
-        raise FileNotFoundError(f"Не найдено фото главного меню: {MAIN_MENU_PHOTO_PATH}")
-    await target.answer_photo(FSInputFile(str(MAIN_MENU_PHOTO_PATH)), caption=caption, reply_markup=main_kb())
+    if MAIN_MENU_PHOTO_PATH.is_file():
+        try:
+            return await target.answer_photo(FSInputFile(str(MAIN_MENU_PHOTO_PATH)), caption=caption, reply_markup=main_kb())
+        except Exception:
+            log.exception("Не удалось отправить фото главного меню; использую текстовый вариант")
+    else:
+        log.error("Файл фото главного меню не найден: %s", MAIN_MENU_PHOTO_PATH)
+    return await target.answer(caption, reply_markup=main_kb())
 
 @dp.message(CommandStart())
 async def start(m: Message, state: FSMContext):
@@ -336,10 +342,7 @@ async def team_menu(c: CallbackQuery):
         caption = f"Ваша команда: {t['name']}, выбирайте кнопки что бы настроить или посмотреть функции"
         markup = kb([[ ("👥Участники","team_members"), ("🔥Мероприятия","events")],
                      [("📈Статистика","team_stats")],[("Расформировать ✖️","team_delete")],[("Назад ↩️","home")]])
-        if TEAM_MENU_PHOTO_ID:
-            await edit_panel(c, caption, reply_markup=markup)
-        else:
-            await edit_panel(c, caption, reply_markup=markup)
+        await edit_panel(c, caption, reply_markup=markup)
     elif t:
         await edit_panel(c, f"Вы состоите в команде «{t['name']}» ({t['tag']}).\nДля управления командой доступны функции владельца.", reply_markup=back_menu())
     else:
@@ -622,12 +625,18 @@ async def deny_admin_command(m: Message):
 async def admin(m:Message):
     if not await require_admin(m):
         return await deny_admin_command(m)
-    await m.answer_photo(
-       FSInputFile(str(MAIN_MENU_PHOTO_PATH)),
-       caption=f"Добро пожаловать в админ-панель, {m.from_user.first_name}, используйте кнопки ниже:",
-       reply_markup=kb([[("Участники 👥","adm_users")],[("Выдать офер📥","adm_offers")],
-                        [("Заявки 💰","adm_payouts")],[("🕴️Добавить администрацию","adm_add")],
-                        [("Новости 🗞","adm_news")],[("🚚 Завоз аккаунтов","adm_stock")]]))
+    admin_caption = f"Добро пожаловать в админ-панель, {m.from_user.first_name}, используйте кнопки ниже:"
+    admin_markup = kb([[("Участники 👥","adm_users")],[("Выдать офер📥","adm_offers")],
+                       [("Заявки 💰","adm_payouts")],[("🕴️Добавить администрацию","adm_add")],
+                       [("Новости 🗞","adm_news")],[("🚚 Завоз аккаунтов","adm_stock")]])
+    try:
+        if MAIN_MENU_PHOTO_PATH.is_file():
+            await m.answer_photo(FSInputFile(str(MAIN_MENU_PHOTO_PATH)), caption=admin_caption, reply_markup=admin_markup)
+        else:
+            await m.answer(admin_caption, reply_markup=admin_markup)
+    except Exception:
+        log.exception("Не удалось отправить фото админ-панели; использую текстовый вариант")
+        await m.answer(admin_caption, reply_markup=admin_markup)
 
 
 @dp.callback_query(F.data.startswith("adm_"))
@@ -983,14 +992,15 @@ async def cancel(m:Message,state:FSMContext):
         except Exception:
             pass
         return
+    # Сначала отправляем ответ, только затем удаляем команду.
+    if not await member_ok(m.from_user.id):
+        await m.answer("Чтобы открыть панель, вступите в команду: " + INVITE)
+    else:
+        await send_home(m, user)
     try:
         await m.delete()
     except Exception:
-        pass
-    if not await member_ok(m.from_user.id):
-        await bot.send_message(m.chat.id, "Чтобы открыть панель, вступите в команду: " + INVITE)
-        return
-    await send_home(m, user)
+        log.debug("Не удалось удалить команду /cancel", exc_info=True)
 
 async def health(request: web.Request):
     """Проверка доступности веб-сервиса Render."""

@@ -20,19 +20,11 @@ services:
         value: INFO
       - key: BOT_MODE
         value: webhook
-      - key: ACCOUNT_LEASE_TTL_MIN
-        value: 30
       - key: WEBHOOK_PATH
         value: /telegram/webhook
       - key: BOT_TOKEN
         sync: false
       - key: WEBHOOK_SECRET
-        sync: false
-      - key: SESSION_ENC_KEY
-        sync: false
-      - key: API_ID
-        sync: false
-      - key: API_HASH
         sync: false
       - key: TEAM_CHAT_ID
         sync: false

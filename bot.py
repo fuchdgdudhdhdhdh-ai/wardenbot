@@ -468,7 +468,7 @@ async def read_news(c: CallbackQuery):
         article = article[:3950] + '\n\n…Текст сокращён.'
     markup = kb([[('К списку новостей', 'news')], [('В меню', 'home')]])
     try:
-        await edit_panel(c, article, reply_markup=markup, disable_web_page_preview=True)
+        await edit_panel(c, article, reply_markup=markup)
     except Exception:
         log.exception("Не удалось открыть новость #%s через редактирование сообщения", news_id)
         await bot.send_message(c.from_user.id, article, reply_markup=markup, disable_web_page_preview=True)

@@ -545,20 +545,40 @@ async def team_delete(c:CallbackQuery):
 
 @dp.callback_query(F.data=="team_stats")
 async def team_stats(c:CallbackQuery):
-    t=await db.one("SELECT * FROM teams WHERE owner_id=?",(c.from_user.id,))
-    if not t: return await c.answer()
-    count=await db.one("SELECT COUNT(*) n FROM users WHERE team_id=? AND id<>?",(t["id"],c.from_user.id))
+    u=await user_row(c.from_user.id)
+    t=await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
+    if not t: return await c.answer("Вы не состоите в команде",show_alert=True)
+    members=await db.all("SELECT id,first_name,username FROM users WHERE team_id=? ORDER BY id",(t["id"],))
+    member_ids=[x["id"] for x in members]
+    links=await db.all("SELECT l.id,l.url,l.assigned_user,o.title FROM links l LEFT JOIN offers o ON o.id=l.offer_id WHERE l.assigned_user IN (SELECT id FROM users WHERE team_id=?) ORDER BY l.id DESC",(t["id"],))
+    total_leads=0
+    lines=[]
+    for link in links:
+        stats=await db.one("SELECT COALESCE(SUM(delta),0) n FROM lead_log WHERE link_id=?",(link["id"],))
+        total_leads += stats["n"]
+        owner=next((x for x in members if x["id"]==link["assigned_user"]),None)
+        label=(owner["first_name"] if owner else str(link["assigned_user"]))
+        lines.append(f"#{link['id']} · {label} · {link['title'] or 'оффер'} · {stats['n']} лидов")
     profit=await db.one("SELECT COALESCE(SUM(amount),0) n FROM payout_requests p JOIN users u ON u.id=p.user_id WHERE u.team_id=? AND p.status='paid'",(t["id"],))
     age=(datetime.now(timezone.utc)-datetime.fromisoformat(t["created_at"])).days
-    await edit_panel(c, f"Здравствуйте, {c.from_user.username or c.from_user.first_name}, статистика команды {t['name']}:\n\n👥Всего траферов: {count['n']}\n🤑Общий профит: ${profit['n']:.2f}\n👦Возраст команды: {age} дней\n⭐Рейтинг: {await team_rating(t['id'])}%",reply_markup=back_menu())
+    body=(f"Команда: {t['name']} ({t['tag']})\nУчастников: {len(members)}\nСсылок: {len(links)}\n"
+          f"Всего лидов по ссылкам команды: {total_leads}\nОплачено участникам: ${profit['n']:.1f}\n"
+          f"Возраст команды: {age} дней\nРейтинг: {await team_rating(t['id'])}%")
+    if lines: body += "\n\nСсылки участников:\n" + "\n".join(lines[:35])
+    await edit_panel(c,body,reply_markup=back_menu())
     await c.answer()
-
 @dp.callback_query(F.data=="events")
 async def events(c:CallbackQuery):
-    t=await db.one("SELECT * FROM teams WHERE owner_id=?",(c.from_user.id,))
-    if not t: return await c.answer()
-    await edit_panel(c, "Мероприятия:",reply_markup=kb([[("Мои Мероприятия","my_events")],[("Создать Мероприятие","event_create")],[("Назад ↩️","team")]]))
+    u=await user_row(c.from_user.id)
+    t=await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
+    if not t: return await c.answer("Вы не состоите в команде",show_alert=True)
+    buttons=[[("Мероприятия и новости","my_events")]]
+    if t["owner_id"]==c.from_user.id:
+        buttons.append([("Создать мероприятие","event_create")])
+    buttons.append([("Назад ↩️","team")])
+    await edit_panel(c,"Мероприятия команды и новости администрации:",reply_markup=kb(buttons))
     await c.answer()
+
 
 @dp.callback_query(F.data=="event_create")
 async def event_create(c:CallbackQuery,state:FSMContext):
@@ -578,10 +598,15 @@ async def event_body(m:Message,state:FSMContext):
 
 @dp.callback_query(F.data=="my_events")
 async def my_events(c:CallbackQuery):
-    t=await db.one("SELECT * FROM teams WHERE owner_id=?",(c.from_user.id,))
+    u=await user_row(c.from_user.id)
+    t=await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
     ev=await db.all("SELECT * FROM events WHERE team_id=? ORDER BY id DESC",(t["id"],)) if t else []
-    await edit_panel(c, "Ваши мероприятия:",reply_markup=kb([[(e["title"],f"event:{e['id']}")] for e in ev]+[[("Назад ↩️","events")]]))
+    news_rows=await db.all("SELECT id,title FROM news ORDER BY id DESC LIMIT 20")
+    rows=[[(e["title"],f"event:{e['id']}")] for e in ev]
+    rows += [[(f"🗞 {n['title']}",f"readnews:{n['id']}")] for n in news_rows]
+    await edit_panel(c,"Мероприятия команды и новости администрации:",reply_markup=kb(rows+[[("Назад ↩️","events")]]))
     await c.answer()
+
 
 @dp.callback_query(F.data.startswith("event:"))
 async def event_open(c:CallbackQuery):

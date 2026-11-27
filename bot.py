@@ -108,7 +108,7 @@ class AccessGuard(BaseMiddleware):
             return await handler(event, data)
         is_admin_user = await db.is_admin(user.id, OWNER_ID)
         message_text = getattr(event, "text", "") or ""
-        allowed_commands = message_text.startswith(("/start", "/cancel", "/admin", "/admdel_"))
+        allowed_commands = message_text.startswith(("/start", "/cancel", "/admin", "/continue", "/admdel_"))
         row = await user_row(user.id)
         if row and row["banned"] and not is_admin_user:
             answer = "⛔ Ваш доступ к боту заблокирован."

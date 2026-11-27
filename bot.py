@@ -1134,6 +1134,11 @@ def create_app() -> web.Application:
     app.on_shutdown.append(on_shutdown)
     return app
 
+if __name__ == "__main__":
+    # Handler modules import bot as app; alias this running module to avoid a second bot instance.
+    import sys
+    sys.modules.setdefault("bot", sys.modules[__name__])
+
 from handlers import accounts_admin, accounts_user as accounts_user_router
 dp.include_router(accounts_admin.router)
 dp.include_router(accounts_user_router.router)

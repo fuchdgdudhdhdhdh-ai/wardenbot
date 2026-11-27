@@ -123,6 +123,30 @@ def is_admin(uid):
 async def user_row(uid):
     return await db.one("SELECT * FROM users WHERE id=?", (uid,))
 
+async def calculated_withdrawable_balance(user):
+    """Доступный вывод: заработок по лидам минус уже созданные заявки на вывод."""
+    if not user or not user.get("current_link_id"):
+        return Decimal("0")
+    link = await db.one("SELECT * FROM links WHERE id=?", (user["current_link_id"],))
+    if not link:
+        return Decimal("0")
+    leads = await db.one(
+        "SELECT COALESCE(SUM(delta),0) n FROM lead_log WHERE user_id=? AND link_id=?",
+        (user["id"], link["id"]),
+    )
+    offer = await db.one("SELECT price FROM offers WHERE id=?", (link["offer_id"],))
+    if not offer:
+        return Decimal("0")
+    bonus = Decimal("0.1") if user["role"] in ("Опытный", "Наставник") else Decimal("0")
+    mentor_discount = Decimal("0.1") if user["mentor_id"] else Decimal("0")
+    rate = max(Decimal("0"), Decimal(str(offer["price"])) + bonus - mentor_discount)
+    earned = (Decimal(str(leads["n"])) * rate).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    withdrawn = await db.one(
+        "SELECT COALESCE(SUM(amount),0) n FROM withdrawals WHERE user_id=?",
+        (user["id"],),
+    )
+    return max(Decimal("0"), earned - Decimal(str(withdrawn["n"]))).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+
 async def member_ok(uid):
     if not CHAT_ID: return True
     try:
@@ -254,8 +278,8 @@ async def profile(c: CallbackQuery):
             mentor_discount = Decimal("0.1") if u["mentor_id"] else Decimal("0")
             profile_rate = max(Decimal("0"), Decimal(str(profile_offer["price"])) + bonus - mentor_discount)
     profile_balance = (Decimal(str(leads["n"])) * profile_rate).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
-    text = (f"Профиль {u['first_name']}:\\nБаланс: ${profile_balance:.1f}\\nЗалито лидов: {leads['n'] if link else 'Нет ссылки'}\\n"
-            f"Ваша ссылка: {number} — {link_text}\\nМой наставник: {mentor_name}\\nДолжность: {u['role']}\\n\\nИспользуй кнопки ниже 👇")
+    text = (f"Профиль {u['first_name']}:\nБаланс: ${profile_balance:.1f}\nЗалито лидов: {leads['n'] if link else 'Нет ссылки'}\n"
+            f"Ваша ссылка: {number} — {link_text}\nМой наставник: {mentor_name}\nДолжность: {u['role']}\n\nИспользуй кнопки ниже 👇")
     rows = [[("💸 Вывод средств", "withdraw")], [("Назад ↩️", "home")]]
     if link:
         offer = await db.one("SELECT * FROM offers WHERE id=?", (link["offer_id"],))
@@ -293,11 +317,12 @@ async def unmentor(c: CallbackQuery):
 async def withdraw_start(c: CallbackQuery, state: FSMContext):
     u = await user_row(c.from_user.id)
     if not u: return await c.answer("Сначала нажмите /start", show_alert=True)
-    if Decimal(str(u.get("balance", 0))) < Decimal("0.1"):
+    available_balance = await calculated_withdrawable_balance(u)
+    if available_balance < Decimal("0.1"):
         await edit_panel(c, "На балансе пока нет средств для вывода.", reply_markup=back_menu())
         return await c.answer()
     await state.set_state(Flow.withdraw_amount)
-    await edit_panel(c, f"Ваш баланс: ${u.get('balance', 0):.1f}. Введите сумму вывода (не больше баланса):",
+    await edit_panel(c, f"Доступно для вывода: ${available_balance:.1f}. Введите сумму (не больше доступного баланса):",
                      reply_markup=kb([[("Отмена ↩️","withdraw_cancel")]]))
     await c.answer()
 
@@ -315,15 +340,11 @@ async def withdraw_submit(m: Message, state: FSMContext):
     except Exception:
         return await m.answer("Введите положительную сумму, например 15.5.")
     u = await user_row(m.from_user.id)
-    if not u or Decimal(str(u.get("balance", 0))) < amount:
-        return await m.answer("Недостаточно средств на балансе. Введите сумму в пределах баланса.")
+    if not u or await calculated_withdrawable_balance(u) < amount:
+        return await m.answer("Недостаточно средств. Введите сумму в пределах доступного баланса по лидам.")
     async def create(conn):
-        cur = await conn.execute("SELECT balance FROM users WHERE id=?", (m.from_user.id,))
-        row = await cur.fetchone()
-        if not row or Decimal(str(row["balance"])) < amount: return None
-        cur = await conn.execute("UPDATE users SET balance=balance-? WHERE id=? AND balance>=? RETURNING id", (float(amount), m.from_user.id, float(amount)))
-        if not await cur.fetchone(): return None
-        cur = await conn.execute("INSERT INTO withdrawals(user_id,amount,created_at) VALUES(?,?,?)", (m.from_user.id,float(amount),now()))
+        cur = await conn.execute("INSERT INTO withdrawals(user_id,amount,created_at) VALUES(?,?,?)",
+                                 (m.from_user.id, float(amount), now()))
         return cur.lastrowid
     try:
         request_id = await db.transaction(create)

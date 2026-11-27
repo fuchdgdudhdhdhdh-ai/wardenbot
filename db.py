@@ -375,7 +375,7 @@ class DB:
             if cuts is not None:
                 if cuts < 0 or cuts > row["leads"]:
                     raise ValueError("Invalid cut count")
-                amount = round((row["leads"] - cuts) * row["price"], 2)
+                amount = round((row["leads"] - cuts) * row["price"], 1)
             await conn.execute("""UPDATE payout_requests SET status=?,cuts=?,amount=?,reviewed_at=?,admin_id=?
                                   WHERE id=? AND status='pending'""",
                                (status, cuts or 0, amount, now(), admin_id, request_id))

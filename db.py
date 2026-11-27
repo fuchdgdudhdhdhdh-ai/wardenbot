@@ -88,13 +88,6 @@ class DB:
             if "mentor_id" not in cols:
                 await db.execute("ALTER TABLE payout_requests ADD COLUMN mentor_id INTEGER")
             await db.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('channel','')")
-            # Миграция реального пула аккаунтов из отдельного SQL-файла.
-            migration_path = Path(__file__).resolve().parent / "migrations" / "002_account_pool.sql"
-            await db.executescript(migration_path.read_text(encoding="utf-8"))
-            account_cols = {row[1] for row in await (await db.execute("PRAGMA table_info(accounts)")).fetchall()}
-            if "client_type" not in account_cols:
-                await db.execute("ALTER TABLE accounts ADD COLUMN client_type TEXT NOT NULL DEFAULT 'telethon'")
-            await db.execute("INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(2,?)", (now(),))
             await db.commit()
 
     async def run(self, sql, args=()):

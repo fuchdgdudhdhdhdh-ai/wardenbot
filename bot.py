@@ -280,7 +280,8 @@ async def withdraw_submit(m: Message, state: FSMContext):
         cur = await conn.execute("SELECT balance FROM users WHERE id=?", (m.from_user.id,))
         row = await cur.fetchone()
         if not row or Decimal(str(row["balance"])) < amount: return None
-        await conn.execute("UPDATE users SET balance=balance-? WHERE id=? AND balance>=?", (float(amount), m.from_user.id, float(amount)))
+        cur = await conn.execute("UPDATE users SET balance=balance-? WHERE id=? AND balance>=? RETURNING id", (float(amount), m.from_user.id, float(amount)))
+        if not await cur.fetchone(): return None
         cur = await conn.execute("INSERT INTO withdrawals(user_id,amount,created_at) VALUES(?,?,?)", (m.from_user.id,float(amount),now()))
         return cur.lastrowid
     try:
@@ -439,8 +440,6 @@ async def team_menu(c: CallbackQuery):
         owner = t["owner_id"] == u["id"]
         caption = f"Команда «{t['name']}» ({t['tag']})."
         rows = [[("🗞 Мероприятия", "events")], [("📊 Статистика", "team_stats")]]
-        if owner:
-            rows.extend([[("👥 Участники", "team_members")], [("Расформировать ✖️", "team_delete")]])
         rows.append([("Назад ↩️", "home")])
         await edit_panel(c, caption, reply_markup=kb(rows))
     else:
@@ -652,7 +651,8 @@ async def demo_type(c: CallbackQuery):
         return await c.answer("Некорректный запрос", show_alert=True)
     min_role = "Опытный" if kind == "premium" else "Трафер"
     if ROLE_LEVEL.get(u["role"], 0) < ROLE_LEVEL[min_role]:
-        return await c.answer(f"Премиум доступен с должности «{min_role}».", show_alert=True)
+        await edit_panel(c, f"Доступ к этому разделу открывается с должности «{min_role}».", reply_markup=kb([[("Назад ↩️","free_accounts")]]))
+        return await c.answer()
     title = "Премиум" if kind == "premium" else "Обычные"
     count = await db.one("SELECT COUNT(*) n FROM demo_account_slots WHERE account_type=? AND status='available'", (kind,))
     await edit_panel(c, 
@@ -670,7 +670,8 @@ async def demo_take(c: CallbackQuery):
         return await c.answer("Некорректный запрос", show_alert=True)
     min_role = "Опытный" if kind == "premium" else "Трафер"
     if ROLE_LEVEL.get(u["role"], 0) < ROLE_LEVEL[min_role]:
-        return await c.answer(f"Недоступно. Минимальная должность: «{min_role}».", show_alert=True)
+        await edit_panel(c, f"Доступно с должности «{min_role}».", reply_markup=kb([[("Назад ↩️","free_accounts")]]))
+        return await c.answer()
     async def allocate(conn):
         cur = await conn.execute("SELECT id,label FROM demo_account_slots WHERE account_type=? AND status='available' ORDER BY id LIMIT 1", (kind,))
         slot = await cur.fetchone()

@@ -183,7 +183,7 @@ async def code_button(c: CallbackQuery, state: FSMContext):
         await state.clear()
         await app.edit_panel(c, "Заливка отменена.", reply_markup=app.kb([[("К складу", "acc_menu")]]))
         return await c.answer()
-    if action == "resend":
+    if action in ("resend", "sms"):
         try:
             note, code_len = await app.code_login.resend(login_id, c.from_user.id, force_sms=(action == "sms"))
         except FloodWaitError as exc:

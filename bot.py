@@ -245,8 +245,16 @@ async def profile(c: CallbackQuery):
     mentor_name = ("@" + mentor["username"]) if mentor and mentor["username"] else (mentor["first_name"] if mentor else "Нету")
     link_text = link["url"] if link else "Нет ссылки"
     number = str(link["id"]) if link else "Нет ссылки"
-    text = (f"Профиль {u['first_name']}:\nБаланс: ${u.get('balance', 0):.1f}\nЗалито лидов: {leads['n'] if link else 'Нет ссылки'}\n"
-            f"Ваша ссылка: {number} — {link_text}\nМой наставник: {mentor_name}\nБаланс: ${u.get('balance',0):.1f}\nДолжность: {u['role']}\n\nИспользуй кнопки ниже 👇")
+    profile_rate = Decimal("0")
+    if link:
+        profile_offer = await db.one("SELECT * FROM offers WHERE id=?", (link["offer_id"],))
+        if profile_offer:
+            bonus = Decimal("0.1") if u["role"] in ("Опытный", "Наставник") else Decimal("0")
+            mentor_discount = Decimal("0.1") if u["mentor_id"] else Decimal("0")
+            profile_rate = max(Decimal("0"), Decimal(str(profile_offer["price"])) + bonus - mentor_discount)
+    profile_balance = (Decimal(str(leads["n"])) * profile_rate).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    text = (f"Профиль {u['first_name']}:\\nБаланс: ${profile_balance:.1f}\\nЗалито лидов: {leads['n'] if link else 'Нет ссылки'}\\n"
+            f"Ваша ссылка: {number} — {link_text}\\nМой наставник: {mentor_name}\\nДолжность: {u['role']}\\n\\nИспользуй кнопки ниже 👇")
     rows = [[("💸 Вывод средств","withdraw")],[("Назад ↩️","home")]]
     if link:
         offer = await db.one("SELECT * FROM offers WHERE id=?", (link["offer_id"],))

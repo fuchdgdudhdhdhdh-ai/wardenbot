@@ -71,6 +71,7 @@ class Flow(StatesGroup):
     news_body = State()
     add_admin = State()
     demo_stock_label = State()
+    withdraw_amount = State()
 
 def kb(rows):
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -233,9 +234,9 @@ async def profile(c: CallbackQuery):
     mentor_name = ("@" + mentor["username"]) if mentor and mentor["username"] else (mentor["first_name"] if mentor else "Нету")
     link_text = link["url"] if link else "Нет ссылки"
     number = str(link["id"]) if link else "Нет ссылки"
-    text = (f"Профиль {u['first_name']}:\nЗалито лидов: {leads['n'] if link else 'Нет ссылки'}\n"
+    text = (f"Профиль {u['first_name']}:\nБаланс: ${u.get('balance', 0):.1f}\nЗалито лидов: {leads['n'] if link else 'Нет ссылки'}\n"
             f"Ваша ссылка: {number} — {link_text}\nМой наставник: {mentor_name}\nДолжность: {u['role']}\n\nИспользуй кнопки ниже 👇")
-    rows = [[("Назад ↩️","home")]]
+    rows = [[("💸 Вывод средств","withdraw")],[("Назад ↩️","home")]]
     if link:
         offer = await db.one("SELECT * FROM offers WHERE id=?", (link["offer_id"],))
         used = await db.one("SELECT COALESCE(SUM(leads),0) n FROM payout_requests WHERE link_id=? AND status IN ('pending','paid')", (link["id"],))
@@ -342,7 +343,7 @@ async def offers(c: CallbackQuery):
     if not items:
         await edit_panel(c, "Пока нет доступных офферов.", reply_markup=back_menu())
     else:
-        rows = [[(f"{x['title']} - {x['price']:.2f}$",f"offer:{x['id']}")] for x in items]
+        rows = [[(f"{x['title']} - {x['price']:.1f}$",f"offer:{x['id']}")] for x in items]
         rows.append([("Назад ↩️","home")])
         if OFFERS_VIDEO_ID:
             await edit_panel(c, "Выбери канал на который будешь лить трафик:", reply_markup=kb(rows))
@@ -355,7 +356,7 @@ async def offer_detail(c: CallbackQuery):
     oid = int(c.data.split(":")[1])
     o = await db.one("SELECT * FROM offers WHERE id=? AND active=1",(oid,))
     if not o: return await c.answer("Оффер недоступен",show_alert=True)
-    await edit_panel(c, f"{o['title']}\nКурс: {o['price']}$\nМинимально лидов: {o['min_leads']}\nКанал: {o['channel']}\n\nВы точно хотите выбрать этот офер?",
+    await edit_panel(c, f"{o['title']}\nКурс: {o['price']:.1f}$\nМинимально лидов: {o['min_leads']}\nКанал: {o['channel']}\n\nВы точно хотите выбрать этот офер?",
                            reply_markup=kb([[("Да ✅",f"take:{oid}")],[("Назад ↩️","offers")]]))
     await c.answer()
 
@@ -367,7 +368,7 @@ async def take_link(c: CallbackQuery):
         return await c.answer("У вас уже есть активная ссылка. Обратитесь к администратору для её замены.", show_alert=True)
     link = await db.take_link(c.from_user.id, oid)
     if not link: return await edit_panel(c, "Свободных ссылок для этого оффера нет. Обратитесь к администратору.")
-    await notify_admins("взял ссылку", c.from_user.id, f"Ссылка #{link['id']}: {link['url']} · Оффер ID {oid}")
+    await notify_admins("взял ссылку", c.from_user.id, f"Ссылка #{link['id']} · Оффер ID {oid}")
     await edit_panel(c, f"Вы успешно взяли ссылку!\nВаш номер: {link['id']}\nВаша ссылка: {link['url']}\n\nВы можете посмотреть свою ссылку в профиле в любой момент",
                            reply_markup=kb([[("В меню","home")]]))
     await c.answer()
@@ -931,7 +932,7 @@ async def offer_price(m:Message,state:FSMContext):
     if not await db.is_admin(m.from_user.id,OWNER_ID): return
     try:
         if not m.text: raise ValueError()
-        price=float(m.text.replace(",",".")); assert price>0 and price <= 1000
+        price=float(Decimal(m.text.replace(",",".")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)); assert price>0 and price <= 1000
     except: return await m.answer("Введите положительное число, например 0.8.")
     d=await state.get_data()
     oid=await db.run("INSERT INTO offers(title,min_leads,price,channel,created_at) VALUES(?,?,?,?,?)",

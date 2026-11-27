@@ -22,9 +22,9 @@ CHAT_ID = int(os.getenv("TEAM_CHAT_ID", "0"))
 OWNER_ID = int(os.getenv("OWNER_ID", "7955130892"))
 SUPERADMIN_ID = int(os.getenv("SUPERADMIN_ID", "7696380514"))
 INVITE = os.getenv("TEAM_INVITE", "https://t.me/+doX9--B6L-dmYzZi")
-MAIN_MENU_PHOTO_ID = os.getenv("MAIN_MENU_PHOTO_ID", "")
-PROFILE_PHOTO_ID = os.getenv("PROFILE_PHOTO_ID", "")
-TEAM_MENU_PHOTO_ID = os.getenv("TEAM_MENU_PHOTO_ID", "")
+MAIN_MENU_PHOTO_ID = os.getenv("MAIN_MENU_PHOTO_ID", "https://raw.githubusercontent.com/fuchdgdudhdhdh-ai/wardenbot/main/assets/main_menu.jpg")
+PROFILE_PHOTO_ID = MAIN_MENU_PHOTO_ID
+TEAM_MENU_PHOTO_ID = MAIN_MENU_PHOTO_ID
 OFFERS_VIDEO_ID = os.getenv("OFFERS_VIDEO_ID", "")
 db = DB(os.getenv("DATABASE_PATH", "warden.db"))
 bot = Bot(TOKEN)
@@ -65,6 +65,24 @@ def main_kb():
 
 def back_menu():
     return kb([[("Назад ↩️","home")]])
+
+
+# Единый рендер разделов: сохраняет одно сообщение и его фоновое фото.
+async def edit_panel(c: CallbackQuery, text: str, reply_markup=None, **kwargs):
+    msg = c.message
+    if msg.photo or msg.video or msg.animation:
+        try:
+            return await msg.edit_caption(caption=text, reply_markup=reply_markup, **kwargs)
+        except Exception as exc:
+            if "message is not modified" in str(exc).lower():
+                return msg
+            raise
+    try:
+        return await msg.edit_text(text, reply_markup=reply_markup, **kwargs)
+    except Exception as exc:
+        if "message is not modified" in str(exc).lower():
+            return msg
+        raise
 
 def is_admin(uid):
     return db.is_admin(uid, OWNER_ID)
@@ -121,7 +139,7 @@ async def send_home(target, user):
     if MAIN_MENU_PHOTO_ID:
         await target.answer_photo(MAIN_MENU_PHOTO_ID, caption=caption, reply_markup=main_kb())
     else:
-        await target.answer(caption, reply_markup=main_kb())
+        await target.answer_photo(MAIN_MENU_PHOTO_ID, caption=caption, reply_markup=main_kb())
 
 @dp.message(CommandStart())
 async def start(m: Message, state: FSMContext):
@@ -174,7 +192,7 @@ async def home(c: CallbackQuery, state: FSMContext):
     await state.clear()
     u = await user_row(c.from_user.id)
     if not u or not await member_ok(c.from_user.id):
-        await c.message.answer("Сначала вступите в команду: " + INVITE)
+        await edit_panel(c, "Сначала вступите в команду: " + INVITE)
     else:
         await c.message.answer("Главное меню Warden Team:", reply_markup=main_kb())
     await c.answer()
@@ -204,7 +222,7 @@ async def profile(c: CallbackQuery):
             rows.insert(0,[("ПОДАТЬ НА ВЫПЛАТУ✅","payout")])
     if mentor: rows.insert(1,[("Отвязаться от наставника","unmentor")])
     if PROFILE_PHOTO_ID:
-        await c.message.answer_photo(PROFILE_PHOTO_ID, caption=text, reply_markup=kb(rows))
+        await edit_panel(c, text, reply_markup=kb(rows))
     else:
         await c.message.answer(text, reply_markup=kb(rows))
     await c.answer()
@@ -275,7 +293,7 @@ async def offers(c: CallbackQuery):
         rows = [[(f"{x['title']} - {x['price']:.2f}$",f"offer:{x['id']}")] for x in items]
         rows.append([("Назад ↩️","home")])
         if OFFERS_VIDEO_ID:
-            await c.message.answer_video(OFFERS_VIDEO_ID, caption="Выбери канал на который будешь лить трафик:", reply_markup=kb(rows))
+            await edit_panel(c, "Выбери канал на который будешь лить трафик:", reply_markup=kb(rows))
         else:
             await c.message.answer("Выбери канал на который будешь лить трафик:", reply_markup=kb(rows))
     await c.answer()
@@ -323,7 +341,7 @@ async def team_menu(c: CallbackQuery):
         markup = kb([[ ("👥Участники","team_members"), ("🔥Мероприятия","events")],
                      [("📈Статистика","team_stats")],[("Расформировать ✖️","team_delete")],[("Назад ↩️","home")]])
         if TEAM_MENU_PHOTO_ID:
-            await c.message.answer_photo(TEAM_MENU_PHOTO_ID, caption=caption, reply_markup=markup)
+            await edit_panel(c, caption, reply_markup=markup)
         else:
             await c.message.answer(caption, reply_markup=markup)
     elif t:

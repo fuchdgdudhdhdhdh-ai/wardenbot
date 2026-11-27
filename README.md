@@ -97,3 +97,12 @@ cp .env.example .env
 - Не публикуй токен бота и секрет webhook.
 - Делай резервные копии SQLite с Persistent Disk.
 - Не удаляй и не пересоздавай Persistent Disk без резервной копии.
+
+
+## Render PostgreSQL
+
+Для постоянного хранения данных можно подключить PostgreSQL Render. В настройках Web Service добавьте переменную окружения **DATABASE_URL** и вставьте **Internal Database URL** из созданной базы Render (если база в другом регионе/вне Render — используйте External Database URL).
+
+При наличии `DATABASE_URL` бот автоматически создаёт таблицы в PostgreSQL. Если на подключённом Persistent Disk осталась старая база `/var/data/warden.db`, при первом запуске она автоматически импортируется в пустую PostgreSQL-базу. Поэтому не удаляйте старую базу/диск до успешного запуска и проверки данных. Если `DATABASE_URL` не задана, бот продолжает использовать SQLite по `DATABASE_PATH`.
+
+После добавления переменной Render выполнит redeploy. Не публикуйте значение `DATABASE_URL` и не отправляйте его в чат.

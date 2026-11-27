@@ -78,7 +78,8 @@ async def listing(c: CallbackQuery):
         return await c.answer("Сначала /start", show_alert=True)
     problem = await role_ok(user, cls)
     if problem:
-        return await c.answer(problem, show_alert=True)
+        await app.edit_panel(c, problem, reply_markup=app.kb([[("Назад ↩️","free_accounts")]]))
+        return await c.answer()
     rows = await app.db.all(
         "SELECT id,label,phone FROM accounts WHERE account_class=? AND status='free' AND available_for_issue=1 ORDER BY id LIMIT 10", (cls,))
     if not rows:

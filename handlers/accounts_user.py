@@ -359,7 +359,7 @@ async def wait_code(client):
             continue
         for msg in messages:
             message_text = getattr(msg, "message", None) or getattr(msg, "text", None) or ""
-            found = re.search(r"(?<!\\d)(\\d{5,6})(?!\\d)", message_text)
+            found = re.search(r"(?<!\d)(\d{5,6})(?!\d)", message_text)
             if found:
                 return found.group(1)
     return None

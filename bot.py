@@ -617,13 +617,21 @@ async def my_events(c:CallbackQuery):
 @dp.callback_query(F.data.startswith("event:"))
 async def event_open(c:CallbackQuery):
     e=await db.one("SELECT * FROM events WHERE id=?",(int(c.data.split(":")[1]),))
-    if e: await edit_panel(c, e["title"]+"\n\n"+e["body"],reply_markup=kb([[("Удалить ✖️",f"eventdel:{e['id']}")],[("Назад ↩️","my_events")]]))
+    u=await user_row(c.from_user.id)
+    t=await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
+    can_delete=bool(e and (await require_admin(c) or (t and t["id"]==e["team_id"] and t["owner_id"]==c.from_user.id)))
+    buttons=([[("Удалить ✖️",f"eventdel:{e['id']}")]] if can_delete else [])
+    buttons.append([("Назад ↩️","my_events")])
+    if e: await edit_panel(c,e["title"]+"\n\n"+e["body"],reply_markup=kb(buttons))
+    else: await c.answer("Мероприятие не найдено",show_alert=True)
     await c.answer()
 
 @dp.callback_query(F.data.startswith("eventdel:"))
 async def event_delete(c:CallbackQuery):
     eid=int(c.data.split(":")[1]); t=await db.one("SELECT * FROM teams WHERE owner_id=?",(c.from_user.id,))
-    if t: await db.run("DELETE FROM events WHERE id=? AND team_id=?",(eid,t["id"]))
+    if await require_admin(c): await db.run("DELETE FROM events WHERE id=?",(eid,))
+    elif t: await db.run("DELETE FROM events WHERE id=? AND team_id=?",(eid,t["id"]))
+    else: return await c.answer("Нет доступа",show_alert=True)
     await edit_panel(c, "Мероприятие удалено.",reply_markup=back_menu()); await c.answer()
 
 @dp.callback_query(F.data=="learning")

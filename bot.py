@@ -581,6 +581,10 @@ async def events(c:CallbackQuery):
 
 @dp.callback_query(F.data=="event_create")
 async def event_create(c:CallbackQuery,state:FSMContext):
+    u=await user_row(c.from_user.id)
+    t=await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
+    if not (t and t["owner_id"]==c.from_user.id):
+        return await c.answer("Создать мероприятие может только владелец команды",show_alert=True)
     await state.set_state(Flow.event_title); await edit_panel(c, "Введи название мероприятия (до 15 символов):"); await c.answer()
 
 @dp.message(Flow.event_title)
@@ -592,7 +596,10 @@ async def event_title(m:Message,state:FSMContext):
 @dp.message(Flow.event_body)
 async def event_body(m:Message,state:FSMContext):
     d=await state.get_data(); t=await db.one("SELECT * FROM teams WHERE owner_id=?",(m.from_user.id,))
-    if t: await db.run("INSERT INTO events(team_id,title,body,created_at) VALUES(?,?,?,?)",(t["id"],d["event_title"],m.text,now()))
+    if not t:
+        await state.clear()
+        return await m.answer("Команда не найдена. Создать мероприятие может владелец команды.")
+    await db.run("INSERT INTO events(team_id,title,body,created_at) VALUES(?,?,?,?)",(t["id"],d["event_title"],m.text,now()))
     await state.clear(); await m.answer("Мероприятие создано.",reply_markup=back_menu())
 
 @dp.callback_query(F.data=="my_events")

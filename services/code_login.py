@@ -79,29 +79,42 @@ class CodeLoginManager:
         return client
 
     async def start(self, admin_id: int, phone: str):
-        api_id, api_hash = self._api()
-        client = await self._connect(api_id, api_hash)
+        try:
+            api_id, api_hash = self._api()
+            client = await asyncio.wait_for(self._connect(api_id, api_hash), 35)
+        except CodeLoginError:
+            raise
+        except Exception as exc:
+            log.exception("Не удалось подключиться к Telegram при добавлении номера %s", phone)
+            raise CodeLoginError(f"Не удалось подключиться к Telegram ({type(exc).__name__}). Проверьте API_ID/API_HASH и доступ сервера к Telegram.") from exc
         try:
             sent = await asyncio.wait_for(client.send_code_request(phone), 40)
         except FloodWaitError:
-            await client.disconnect()
+            try: await client.disconnect()
+            except Exception: pass
             raise
         except PhoneNumberInvalidError as exc:
-            await client.disconnect()
-            raise CodeLoginError("Telegram не принял номер. Проверьте формат.") from exc
+            try: await client.disconnect()
+            except Exception: pass
+            raise CodeLoginError("Telegram не принял номер. Проверьте международный формат номера.") from exc
         except Exception as exc:
-            await client.disconnect()
+            try: await client.disconnect()
+            except Exception: pass
             log.exception("Telegram не отправил код для номера %s", phone)
             raise CodeLoginError(f"Telegram не отправил код ({type(exc).__name__}): {exc}") from exc
-        temp_session = encrypt(StringSession.save(client.session))
-        login_id = await self.db.run(
-            """INSERT INTO account_logins(admin_id,phone,api_id,api_hash,phone_code_hash,temp_session_enc,created_at,expires_at)
-               VALUES(?,?,?,?,?,?,?,?)""",
-            (admin_id, phone, api_id, api_hash, sent.phone_code_hash, temp_session,
-             _now().isoformat(), (_now() + timedelta(minutes=LOGIN_TTL_MIN)).isoformat()))
+        try:
+            temp_session = encrypt(StringSession.save(client.session))
+            login_id = await self.db.run(
+                """INSERT INTO account_logins(admin_id,phone,api_id,api_hash,phone_code_hash,temp_session_enc,created_at,expires_at)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (admin_id, phone, api_id, api_hash, sent.phone_code_hash, temp_session,
+                 _now().isoformat(), (_now() + timedelta(minutes=LOGIN_TTL_MIN)).isoformat()))
+        except Exception:
+            try: await client.disconnect()
+            except Exception: pass
+            raise
         self._clients[login_id] = client
         return login_id, self.describe(sent.type), sent.timeout or 60, (getattr(sent.type, "length", None) or 5)
-
     async def _persist_temp(self, login_id, client):
         await self.db.run("UPDATE account_logins SET temp_session_enc=? WHERE id=?",
                           (encrypt(StringSession.save(client.session)), login_id))

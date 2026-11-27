@@ -1078,10 +1078,9 @@ async def withdrawal_review(c: CallbackQuery):
     action, raw_id = c.data.split(":")
     request_id = int(raw_id)
     status = "paid" if action == "wd_paid" else "rejected"
-    row = await db.one("SELECT * FROM withdrawals WHERE id=? AND status='pending'", (request_id,))
+    row = await db.one("UPDATE withdrawals SET status=?,reviewed_at=?,admin_id=? WHERE id=? AND status='pending' RETURNING user_id,amount",
+                       (status, now(), c.from_user.id, request_id))
     if not row: return await c.answer("Заявка уже обработана", show_alert=True)
-    await db.run("UPDATE withdrawals SET status=?,reviewed_at=?,admin_id=? WHERE id=? AND status='pending'",
-                 (status, now(), c.from_user.id, request_id))
     user = await user_row(row["user_id"])
     if status == "paid":
         message = f"Заявка на вывод #{request_id} одобрена и отмечена как выплаченная. Сумма: ${row['amount']:.1f}."
@@ -1230,11 +1229,12 @@ async def balance_minus(m: Message):
     try: amount = Decimal(raw_amount.replace(",", ".")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
     except Exception: return await m.answer("Сумма должна быть числом, например /minus 10.5")
     if amount <= 0: return await m.answer("Сумма должна быть больше нуля.")
-    await db.run("UPDATE users SET balance=balance-? WHERE id=? AND balance>=?", (float(amount),uid,float(amount)))
+    updated = await db.one("UPDATE users SET balance=balance-? WHERE id=? AND balance>=? RETURNING balance", (float(amount),uid,float(amount)))
     u = await user_row(uid)
     if not u: return await m.answer("Пользователь не найден.")
+    if not updated: return await m.answer("Недостаточно средств на балансе пользователя.")
     await db.audit(m.from_user.id,"balance_minus",uid,str(amount))
-    await m.answer(f"Баланс пользователя {uid}: ${u['balance']:.1f}.")
+    await m.answer(f"Баланс пользователя {uid}: ${updated['balance']:.1f}.")
 
 @dp.message(Command("cancel"))
 async def cancel(m:Message,state:FSMContext):

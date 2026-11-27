@@ -1141,7 +1141,7 @@ async def payout_detail(c:CallbackQuery):
     u=await user_row(r["user_id"]) if r else None
     if not r or not u: return await c.answer("Заявка не найдена",show_alert=True)
     details = (f"Трафер: @{u['username'] or u['first_name']}\nНомер ссылки: {r['link_id']}\n"
-        f"Кол-во лидов: {r['leads']}\nСумма к оплате: ${r['amount']:.2f}\nСчет для оплаты: {r['invoice'] or 'не прислан'}")
+        f"Кол-во лидов: {r['leads']}\nСумма к оплате: ${r['amount']:.1f}\nСчет для оплаты: {r['invoice'] or 'не прислан'}")
     if not r["invoice"]:
         await edit_panel(c, details + "\n\nОжидается ссылка на счёт CryptoBot от участника.", reply_markup=kb([[("Назад ↩️", "adm_payouts")]]))
     else:

@@ -8,7 +8,7 @@ PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA busy_timeout = 5000;
 CREATE TABLE IF NOT EXISTS users(
- id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, role TEXT NOT NULL DEFAULT 'Новичок',
+ id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, role TEXT NOT NULL DEFAULT 'Новичок', balance REAL NOT NULL DEFAULT 0,
  joined_at TEXT NOT NULL, banned INTEGER NOT NULL DEFAULT 0, restricted_until TEXT,
  mentor_id INTEGER, team_id INTEGER, referral_code TEXT UNIQUE,
  current_offer_id INTEGER, current_link_id INTEGER
@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS events(
  id INTEGER PRIMARY KEY AUTOINCREMENT, team_id INTEGER NOT NULL, title TEXT NOT NULL,
  body TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS withdrawals(
+ id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount REAL NOT NULL CHECK(amount > 0), status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','paid','rejected')), created_at TEXT NOT NULL, reviewed_at TEXT, admin_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON withdrawals(status,created_at);
 CREATE TABLE IF NOT EXISTS payout_requests(
  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, link_id INTEGER,
  leads INTEGER NOT NULL CHECK(leads > 0), price REAL NOT NULL CHECK(price >= 0), amount REAL NOT NULL CHECK(amount >= 0),
@@ -71,6 +75,7 @@ CREATE TABLE IF NOT EXISTS accounts(
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  account_class TEXT NOT NULL DEFAULT 'ordinary' CHECK(account_class IN ('ordinary','premium')),
  label TEXT NOT NULL,
+ available_for_issue INTEGER NOT NULL DEFAULT 1,
  api_id INTEGER NOT NULL,
  api_hash TEXT NOT NULL,
  session_enc BLOB NOT NULL,
@@ -193,6 +198,9 @@ class DB:
                 migrations = {"account_class":"TEXT NOT NULL DEFAULT 'ordinary'","twofa_enc":"BLOB","twofa_shared":"INTEGER NOT NULL DEFAULT 0","client_type":"TEXT NOT NULL DEFAULT 'telethon'","proxy":"TEXT","note":"TEXT","last_used_at":"TEXT","last_check_at":"TEXT","check_failures":"INTEGER NOT NULL DEFAULT 0"}
                 for col, ddl in migrations.items():
                     if col not in acc_cols: await db.execute(f"ALTER TABLE accounts ADD COLUMN {col} {ddl}")
+                user_cols = {row[1] for row in await (await db.execute("PRAGMA table_info(users)")).fetchall()}
+                if "balance" not in user_cols: await db.execute("ALTER TABLE users ADD COLUMN balance REAL NOT NULL DEFAULT 0")
+                if "available_for_issue" not in acc_cols: await db.execute("ALTER TABLE accounts ADD COLUMN available_for_issue INTEGER NOT NULL DEFAULT 1")
                 await db.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('channel','')")
                 await db.commit()
             return
@@ -205,11 +213,13 @@ class DB:
         async with pool.acquire() as conn:
             for statement in schema.split(";"):
                 if statement.strip(): await conn.execute(statement)
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS balance DOUBLE PRECISION NOT NULL DEFAULT 0")
+            await conn.execute("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS available_for_issue BIGINT NOT NULL DEFAULT 1")
             # Import the existing persistent SQLite file once, before the new database gets populated.
             if os.path.exists(self.path) and await conn.fetchval("SELECT COUNT(*) FROM users") == 0:
                 src = sqlite3.connect(self.path)
                 src.row_factory = sqlite3.Row
-                tables = ["users","offers","links","teams","events","payout_requests","lead_log","admins","news","settings","admin_audit","schema_migrations","demo_account_slots","accounts","account_events","account_logins"]
+                tables = ["users","withdrawals","offers","links","teams","events","payout_requests","lead_log","admins","news","settings","admin_audit","schema_migrations","demo_account_slots","accounts","account_events","account_logins"]
                 async with conn.transaction():
                     for table in tables:
                         try: rows = src.execute(f'SELECT * FROM "{table}"').fetchall()

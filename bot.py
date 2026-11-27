@@ -575,7 +575,7 @@ async def team_stats(c:CallbackQuery):
         label=(owner["first_name"] if owner else str(link["assigned_user"]))
         lines.append(f"#{link['id']} · {label} · {link['title'] or 'оффер'} · {stats['n']} лидов")
     profit=await db.one("SELECT COALESCE(SUM(amount),0) n FROM payout_requests p JOIN users u ON u.id=p.user_id WHERE u.team_id=? AND p.status='paid'",(t["id"],))
-    age=(datetime.now(timezone.utc)-datetime.fromisoformat(t["created_at"])).days
+    created=datetime.fromisoformat(t["created_at"]); created=created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created\n    age=max(0,(datetime.now(timezone.utc)-created).days)
     body=(f"Команда: {t['name']} ({t['tag']})\nУчастников: {len(members)}\nСсылок: {len(links)}\n"
           f"Всего лидов по ссылкам команды: {total_leads}\nОплачено участникам: ${profit['n']:.1f}\n"
           f"Возраст команды: {age} дней\nРейтинг: {await team_rating(t['id'])}%")
@@ -599,8 +599,8 @@ async def events(c:CallbackQuery):
 async def event_create(c:CallbackQuery,state:FSMContext):
     u=await user_row(c.from_user.id)
     t=await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
-    if not (t and t["owner_id"]==c.from_user.id):
-        return await c.answer("Создать мероприятие может только владелец команды",show_alert=True)
+    if not (await require_admin(c) or (t and t["owner_id"]==c.from_user.id)):
+        return await c.answer("Создать мероприятие может только владелец команды или администратор",show_alert=True)
     await state.set_state(Flow.event_title); await edit_panel(c, "Введи название мероприятия (до 15 символов):"); await c.answer()
 
 @dp.message(Flow.event_title)
@@ -644,9 +644,14 @@ async def event_open(c:CallbackQuery):
 
 @dp.callback_query(F.data.startswith("eventdel:"))
 async def event_delete(c:CallbackQuery):
-    eid=int(c.data.split(":")[1]); t=await db.one("SELECT * FROM teams WHERE owner_id=?",(c.from_user.id,))
+    eid=int(c.data.split(":")[1])
+    e=await db.one("SELECT * FROM events WHERE id=?",(eid,))
+    u=await user_row(c.from_user.id)
+    t=await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
+    if not e: return await c.answer("Мероприятие не найдено",show_alert=True)
     if await require_admin(c): await db.run("DELETE FROM events WHERE id=?",(eid,))
-    elif t: await db.run("DELETE FROM events WHERE id=? AND team_id=?",(eid,t["id"]))
+    elif t and t["owner_id"]==c.from_user.id and t["id"]==e["team_id"]:
+        await db.run("DELETE FROM events WHERE id=? AND team_id=?",(eid,t["id"]))
     else: return await c.answer("Нет доступа",show_alert=True)
     await edit_panel(c, "Мероприятие удалено.",reply_markup=back_menu()); await c.answer()
 

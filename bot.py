@@ -779,7 +779,7 @@ async def stock_add_label(m: Message, state: FSMContext):
     slot_id = await db.run("INSERT INTO demo_account_slots(account_type,label) VALUES(?,?)", (kind, label))
     await db.audit(m.from_user.id, "demo_slot_added", slot_id, f"type={kind}; label={label}")
     await state.clear()
-    await m.answer(f"Тестовый слот #{slot_id} добавлен на склад.", reply_markup=kb([[('Открыть склад', 'adm_stock')], [('В меню', 'home')]]))
+    await m.answer(f"Тестовый слот #{slot_id} добавлен на склад.", reply_markup=kb([[('Открыть склад', 'adm_stock')], [('В админ-панель', 'admin_home')]]))
 
 @dp.callback_query(F.data.startswith("admuser:"))
 async def admin_user(c:CallbackQuery):
@@ -930,7 +930,7 @@ async def offer_price(m:Message,state:FSMContext):
             await db.run("INSERT INTO links(offer_id,url) VALUES(?,?)",(oid,url)); added += 1
         except Exception:
             pass
-    await state.clear(); await m.answer(f"Оффер создан. Ссылок добавлено: {added} (дубликаты пропущены).",reply_markup=back_menu())
+    await state.clear(); await m.answer(f"Оффер создан. Ссылок добавлено: {added} (дубликаты пропущены).",reply_markup=kb([[("В админ-панель", "admin_home")]]))
 
 @dp.callback_query(F.data.startswith("linkstats:"))
 async def link_stats(c:CallbackQuery):
@@ -971,7 +971,7 @@ async def payout_detail(c:CallbackQuery):
     details = (f"Трафер: @{u['username'] or u['first_name']}\nНомер ссылки: {r['link_id']}\n"
         f"Кол-во лидов: {r['leads']}\nСумма к оплате: ${r['amount']:.2f}\nСчет для оплаты: {r['invoice'] or 'не прислан'}")
     if not r["invoice"]:
-        await edit_panel(c, details + "\n\nОжидается ссылка на счёт CryptoBot от участника.", reply_markup=back_menu())
+        await edit_panel(c, details + "\n\nОжидается ссылка на счёт CryptoBot от участника.", reply_markup=kb([[("Назад ↩️", "adm_payouts")]]))
     else:
         await edit_panel(c, details, reply_markup=kb([[ ("Оплачено ✅",f"paid:{rid}")],[ ("Срезать ✂️",f"cut:{rid}")],[ ("Отклонить ❌",f"reject:{rid}")],[ ("Назад ↩️","adm_payouts")]]))
     await c.answer()

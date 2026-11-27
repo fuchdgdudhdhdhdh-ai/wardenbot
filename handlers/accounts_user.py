@@ -243,8 +243,11 @@ async def inbox(c: CallbackQuery):
         return await c.message.answer("Диалогов нет.")
     lines = []
     for d in dialogs:
-        name = d.name or "без названия"
-        unread = f" [{d.unread_count}]" if getattr(d, "unread_count", 0) else ""
+        chat = getattr(d, "chat", None)
+        name = (getattr(d, "name", None) or getattr(chat, "title", None)
+                or getattr(chat, "first_name", None) or str(getattr(chat, "id", "без названия")))
+        unread_count = getattr(d, "unread_count", getattr(d, "unread_messages", 0))
+        unread = f" [{unread_count}]" if unread_count else ""
         lines.append(f"• {name}{unread}")
     await c.message.answer("Последние диалоги:\n" + "\n".join(lines),
                            reply_markup=app.kb([[("В панель", f"uacc_panel:{acc_id}")]]))
@@ -283,7 +286,8 @@ async def join_do(m: Message, state: FSMContext):
             if invite_hash:
                 await client(ImportChatInviteRequest(invite_hash))
             else:
-                await client(JoinChannelRequest(link))
+                entity = await client.get_entity(link)
+                await client(JoinChannelRequest(entity))
     except (NotYourAccount, LeaseExpired) as exc:
         return await m.answer(f"Не вступил: {exc}")
     except Exception as exc:
@@ -338,7 +342,7 @@ async def wait_code(client):
             continue
         for msg in messages:
             message_text = getattr(msg, "message", None) or getattr(msg, "text", None) or ""
-            found = re.search(r"(?<!\\d)(\\d{5,6})(?!\\d)", message_text)
+            found = re.search(r"(?<!\d)(\d{5,6})(?!\d)", message_text)
             if found:
                 return found.group(1)
     return None

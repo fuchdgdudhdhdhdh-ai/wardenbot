@@ -2,12 +2,13 @@ import asyncio, os, re, logging
 from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F, BaseMiddleware
 from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ChatMemberUpdated
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ChatMemberUpdated, FSInputFile
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -136,7 +137,9 @@ async def send_home(target, user):
     name = user.get("username") or user.get("first_name") or "участник"
     caption = (f"Привет, {name}! Это панель тимы «Warden Team». С помощью бота ты можешь взять ссылку, "
                "посмотреть статистику и запросить выплату. Нажимай кнопки ниже и пользуйся ботом.")
-    await target.answer_photo(MAIN_MENU_PHOTO_ID, caption=caption, reply_markup=main_kb())
+    if not MAIN_MENU_PHOTO_PATH.is_file():
+        raise FileNotFoundError(f"Не найдено фото главного меню: {MAIN_MENU_PHOTO_PATH}")
+    await target.answer_photo(FSInputFile(str(MAIN_MENU_PHOTO_PATH)), caption=caption, reply_markup=main_kb())
 
 @dp.message(CommandStart())
 async def start(m: Message, state: FSMContext):
@@ -180,7 +183,7 @@ async def on_membership_update(event: ChatMemberUpdated):
             u = await user_row(member.id)
             if u and not u["banned"]:
                 try:
-                    await bot.send_photo(member.id, MAIN_MENU_PHOTO_ID, caption="Вы вступили в Warden Team! Открываю панель.", reply_markup=main_kb())
+                    await bot.send_photo(member.id, FSInputFile(str(MAIN_MENU_PHOTO_PATH)), caption="Вы вступили в Warden Team! Открываю панель.", reply_markup=main_kb())
                 except Exception as exc:
                     log.info("Could not DM joining user %s: %s", member.id, exc)
 
@@ -602,13 +605,34 @@ async def demo_complete(c: CallbackQuery):
 async def require_admin(event):
     return await db.is_admin(event.from_user.id,OWNER_ID)
 
+async def deny_admin_command(m: Message):
+    # Для Message Telegram не поддерживает show_alert; удаляем команду
+    # и показываем короткое уведомление с последующим удалением.
+    try:
+        await m.delete()
+    except Exception:
+        pass
+    notice = await bot.send_message(m.chat.id, "⛔ У вас нет прав администратора.")
+    async def remove_notice():
+        await asyncio.sleep(4)
+        try:
+            await notice.delete()
+        except Exception:
+            pass
+    asyncio.create_task(remove_notice())
+
+
 @dp.message(Command("admin"))
 async def admin(m:Message):
-    if not await require_admin(m): return
-    await m.answer(f"Добро пожаловать в админ-панель, {m.from_user.first_name}, используйте кнопки ниже:",
+    if not await require_admin(m):
+        return await deny_admin_command(m)
+    await m.answer_photo(
+       FSInputFile(str(MAIN_MENU_PHOTO_PATH)),
+       caption=f"Добро пожаловать в админ-панель, {m.from_user.first_name}, используйте кнопки ниже:",
        reply_markup=kb([[("Участники 👥","adm_users")],[("Выдать офер📥","adm_offers")],
                         [("Заявки 💰","adm_payouts")],[("🕴️Добавить администрацию","adm_add")],
                         [("Новости 🗞","adm_news")],[("🚚 Завоз аккаунтов","adm_stock")]]))
+
 
 @dp.callback_query(F.data.startswith("adm_"))
 async def admin_router(c:CallbackQuery,state:FSMContext):
@@ -790,7 +814,12 @@ async def offer_link_add(m:Message,state:FSMContext):
 
 @dp.message(Command("continue"))
 async def continue_offer(m:Message,state:FSMContext):
-    if not await db.is_admin(m.from_user.id,OWNER_ID): return
+    if not await db.is_admin(m.from_user.id,OWNER_ID):
+        return await deny_admin_command(m)
+    try:
+        await m.delete()
+    except Exception:
+        pass
     if await state.get_state()!=Flow.offer_links.state: return
     d=await state.get_data()
     if not d.get("links"): return await m.answer("Добавьте хотя бы одну ссылку.")
@@ -969,8 +998,6 @@ async def on_startup(app: web.Application):
     from aiogram.types import BotCommand
     await bot.set_my_commands([
         BotCommand(command="start", description="Открыть панель"),
-        BotCommand(command="admin", description="Админ-панель"),
-        BotCommand(command="continue", description="Завершить загрузку ссылок"),
         BotCommand(command="cancel", description="Отменить действие"),
     ])
 

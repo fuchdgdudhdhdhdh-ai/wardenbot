@@ -65,7 +65,7 @@ async def stock_text():
 
 def stock_kb():
     return app.kb([[("➕ По номеру", "acc_add")], [("📎 Импорт файла", "acc_imp")],
-                   [("📋 Список аккаунтов", "acc_list:0")], [("Назад ↩️", "home")]])
+                   [("📋 Список аккаунтов", "acc_list:0")], [("Назад ↩️", "admin_home")]])
 
 
 @router.callback_query(F.data == "acc_menu")

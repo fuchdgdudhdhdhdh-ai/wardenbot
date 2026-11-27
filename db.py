@@ -376,10 +376,9 @@ class DB:
             link = await cur.fetchone()
             if not link:
                 return None
-            await conn.execute("UPDATE links SET assigned_user=?,assigned_at=? WHERE id=? AND assigned_user IS NULL",
-                               (user_id, now(), link["id"]))
-            cur = await conn.execute("SELECT changes()")
-            if (await cur.fetchone())[0] != 1:
+            cur = await conn.execute("UPDATE links SET assigned_user=?,assigned_at=? WHERE id=? AND assigned_user IS NULL RETURNING id",
+                                     (user_id, now(), link["id"]))
+            if not await cur.fetchone():
                 return None
             await conn.execute("UPDATE users SET current_offer_id=?,current_link_id=? WHERE id=?",
                                (offer_id, link["id"], user_id))

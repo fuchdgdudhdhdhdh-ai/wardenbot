@@ -1,121 +1,95 @@
 # Warden Team Bot — Render Web Service
 
-Проект запускается на Render как **Web Service с Telegram webhook**, а не как Background Worker и не через long polling. HTTP-сервер слушает `0.0.0.0:$PORT`, маршрут `/health` используется Render для health check, маршрут `/telegram/webhook` принимает обновления Telegram.
+Warden Team работает на Render как **один Web Service** с Telegram webhook. Redis не требуется. Для SQLite используется Persistent Disk.
 
-## 1. Подготовка GitHub
+## Render Blueprint
 
-1. Распакуйте архив проекта.
-2. Загрузите в отдельный GitHub-репозиторий **содержимое папки `warden_team_bot`**, а не сам ZIP.
-3. Убедитесь, что в корне репозитория лежат `bot.py`, `db.py`, `requirements.txt` и `render.yaml`.
-4. Не добавляйте `.env`, `warden.db`, файлы `.session`, JSON сессии, резервные копии и каталоги `tmp/` в Git.
-5. Проверьте, что `.gitignore` исключает секреты и локальную БД.
+1. Открой Render Dashboard → **New → Blueprint**.
+2. Выбери GitHub-репозиторий `fuchdgdudhdhdhdh-ai/wardenbot`.
+3. Render прочитает `render.yaml` и создаст Web Service.
+4. Заполни секретные Environment Variables.
 
-## 2. Создание сервиса Render
+Настройки из `render.yaml`:
 
-Рекомендуемый вариант — Blueprint:
+- Runtime: Python 3.12
+- Build: `pip install --upgrade pip && pip install -r requirements.txt`
+- Start: `python bot.py`
+- Health check: `/health`
+- Persistent Disk: `/var/data`, 1 GB
+- SQLite: `/var/data/warden.db`
+- Telegram mode: webhook
+- Один экземпляр сервиса
 
-1. Откройте Render Dashboard → **New** → **Blueprint**.
-2. Подключите GitHub и выберите репозиторий.
-3. Render обнаружит `render.yaml`.
-4. Подтвердите создание Web Service.
-5. При первом создании заполните переменные окружения, помеченные как секретные/не заданные.
+Для сохранения SQLite между деплоями нужен тариф Render с Persistent Disk. Не удаляй диск при обновлении сервиса.
 
-В Blueprint уже указаны:
+## Environment Variables
 
-- Runtime: Python 3.12;
-- Build: `pip install --upgrade pip && pip install -r requirements.txt`;
-- Start: `python bot.py`;
-- Health check: `/health`;
-- SQLite: `/var/data/warden.db`;
-- Persistent Disk: `/var/data`;
-- режим Telegram webhook.
-
-**Важно про тариф Render:** для сохранения SQLite-файла между деплоями и перезапусками нужен Persistent Disk. В `render.yaml` выбран платный `starter` Web Service и диск 1 GB. Бесплатный Web Service не предоставляет постоянный диск: SQLite на его файловой системе может исчезнуть при redeploy/restart. Не переключайте сервис на Free, если хотите сохранить пользователей, заявки и зашифрованные аккаунты.
-
-Запускайте только **один экземпляр** этого сервиса: SQLite и локальный пул клиентов рассчитаны на один процесс/одну реплику. Не создавайте второй Web Service из того же репозитория с тем же Telegram bot token.
-
-## 3. Environment Variables
-
-В Render → ваш сервис → **Environment** заполните:
-
-| Переменная | Что указать |
+| Переменная | Значение |
 |---|---|
-| `BOT_TOKEN` | Токен бота от @BotFather |
-| `WEBHOOK_SECRET` | Случайная строка 32–64 символа из `A-Z a-z 0-9 _ -` |
-| `SESSION_ENC_KEY` | Ключ Fernet, см. генерацию ниже |
-| `API_ID` | Telegram API ID с my.telegram.org |
-| `API_HASH` | Telegram API Hash с my.telegram.org |
-| `TEAM_CHAT_ID` | ID вашей группы, например `-100...`; если проверка членства не нужна — `0` |
-| `OWNER_ID` | Telegram ID владельца бота, только цифры |
-| `SUPERADMIN_ID` | Telegram ID суперадминистратора, только цифры |
-| `TEAM_INVITE` | Пригласительная ссылка в команду |
-| `REDIS_URL` | Необязательно: URL Redis/Render Key Value для сохранения FSM между перезапусками |
+| `BOT_TOKEN` | Токен от @BotFather |
+| `WEBHOOK_SECRET` | Случайная строка из букв A-Z, a-z, цифр, `_` и `-` |
+| `TEAM_CHAT_ID` | ID командной группы, например `-100...`; `0` отключает проверку членства |
+| `OWNER_ID` | Telegram ID владельца |
+| `SUPERADMIN_ID` | Telegram ID суперадминистратора |
+| `TEAM_INVITE` | Пригласительная ссылка команды |
+| `DATABASE_PATH` | Уже задано Blueprint: `/var/data/warden.db` |
 
-Не меняйте заданные в Blueprint `DATABASE_PATH=/var/data/warden.db`, `BOT_MODE=webhook`, `WEBHOOK_PATH=/telegram/webhook` и `ACCOUNT_LEASE_TTL_MIN=30` без необходимости.
+Не добавляй Redis, API_ID, API_HASH или SESSION_ENC_KEY: демонстрационный каталог не использует реальные Telegram-сессии.
 
-Генерация ключей локально:
+Сгенерировать секрет webhook можно локально:
 
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Первую команду используйте для `SESSION_ENC_KEY`, вторую — для `WEBHOOK_SECRET`. Сохраните `SESSION_ENC_KEY` отдельно в надёжном менеджере секретов и резервной копии. Потеря ключа означает потерю доступа ко всем зашифрованным строкам сессий. Не генерируйте новый ключ при каждом деплое.
+## Webhook и проверка
 
-## 4. Webhook и health check
+При запуске приложение берёт внешний URL из `RENDER_EXTERNAL_URL`, регистрирует webhook и проверяет секретный заголовок Telegram.
 
-Приложение само устанавливает webhook при запуске, используя `RENDER_EXTERNAL_URL`, и проверяет входящий секрет Telegram через `WEBHOOK_SECRET`. Вручную указывать домен Render не требуется. Render должен видеть успешный ответ `GET /health`.
+После деплоя:
 
-Если меняете `WEBHOOK_PATH`, поменяйте его только в Environment; приложение использует одно и то же значение при регистрации webhook и при создании HTTP-маршрута.
+1. В Render Events должен появиться статус **Live**.
+2. Открой `https://<имя-сервиса>.onrender.com/health`.
+3. Ожидаемый ответ:
 
-Не запускайте параллельно локальный polling с тем же токеном, пока Render webhook активен. Telegram не поддерживает одновременный webhook и `getUpdates` для одного бота.
+```json
+{"status":"ok","service":"warden-team-bot"}
+```
 
-## 5. Данные и файловая система
+4. В логах должно появиться `Webhook запущен для @...`.
+5. Отправь боту `/start` и проверь меню.
 
-- Основная SQLite БД и все бизнес-данные: `/var/data/warden.db` на Persistent Disk.
-- Временные загруженные `.session`/`.json`: временная папка приложения; файлы удаляются после обработки и не должны коммититься.
-- FSM: Redis, если задан `REDIS_URL`; без Redis используется память процесса, незавершённые шаги FSM теряются при перезапуске сервиса.
-- Живые Telethon/Pyrogram клиенты существуют только в памяти процесса и корректно отключаются при штатном shutdown. После перезапуска клиент подключается лениво при следующем действии пользователя.
+Не запускай polling с тем же токеном одновременно с Render webhook.
 
-Настройте регулярные резервные копии SQLite с Persistent Disk во внешнее хранилище. Сам Persistent Disk не заменяет backup. Не включайте в Git `warden.db`, резервные копии или сессионные файлы.
+## Бесплатный аккаунт ☎ — только демо-механика
 
-## 6. Локальная разработка
+Раздел не импортирует, не хранит и не выдаёт реальные Telegram-аккаунты, номера, коды, пароли, JSON-сессии или файлы `.session`.
+
+- Доступ к обычным тестовым слотам — от роли «Трафер».
+- Доступ к премиум тестовым слотам — от роли «Опытный».
+- Администратор добавляет слот только текстовой меткой, например `DEMO-001`.
+- Участник получает демонстрационный слот, открывает демо-панель и завершает учебный сценарий.
+- Назначение и завершение записываются в SQLite и журнал аудита.
+
+В проекте нет активных обработчиков импорта реальных сессий и аренды реальных аккаунтов. Старые таблицы, если они уже существовали в базе, не удаляются автоматически.
+
+## Redis и FSM
+
+Redis не нужен. Состояния FSM хранятся в памяти процесса и сбрасываются после перезапуска сервиса. Данные пользователей, оферов, выплат и демо-слотов хранятся в SQLite на Persistent Disk.
+
+## Локальный запуск
 
 ```bash
 python -m venv .venv
-# Linux/macOS
-source .venv/bin/activate
-# Windows PowerShell: .venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
 cp .env.example .env
-python bot.py
 ```
 
-Локально `BOT_MODE=polling` (по умолчанию). Для Render Blueprint автоматически задан `BOT_MODE=webhook`.
+Для локального polling укажи `BOT_MODE=polling`. Для Render Blueprint используется `BOT_MODE=webhook`.
 
-## 7. Деплой и обновление
+## Важно
 
-При каждом push в подключённую ветку Render выполняет build и deploy. После деплоя проверьте:
-
-1. В Render Events статус Deploy live.
-2. `https://<имя-сервиса>.onrender.com/health` возвращает `{"status":"ok","service":"warden-team-bot"}`.
-3. В логах есть сообщение `Webhook запущен для @...`.
-4. В Telegram `/start` отвечает.
-5. `/admin` открывается у владельца.
-6. После тестового импорта и перезапуска сервиса аккаунт остаётся в списке.
-
-## 8. Что важно не менять в production
-
-- Не удаляйте и не пересоздавайте Persistent Disk без резервной копии.
-- Не меняйте `SESSION_ENC_KEY` после импорта аккаунтов без процедуры перешифровки.
-- Не запускайте две реплики приложения с одной SQLite БД и одним Telegram bot token.
-- Не публикуйте `.env`, токен бота, API_HASH, WEBHOOK_SECRET, SESSION_ENC_KEY, файлы `.session` и JSON авторизации.
-- Для нескольких реплик, высокой нагрузки и горизонтального масштабирования потребуется отдельная миграция SQLite на PostgreSQL и согласованный распределённый пул клиентов; текущий пул рассчитан на один процесс.
-
-## 9. Тесты
-
-```bash
-python -m unittest discover -s tests/ -p 'test_*.py'
-```
-
-После публикации на Render дополнительно проверьте webhook, загрузку файлов, импорт сессий, аренду двумя пользователями, TTL, повторный импорт и восстановление данных после redeploy.
+- Оставь один экземпляр сервиса: SQLite рассчитана на одну реплику.
+- Не публикуй токен бота и секрет webhook.
+- Делай резервные копии SQLite с Persistent Disk.
+- Не удаляй и не пересоздавай Persistent Disk без резервной копии.

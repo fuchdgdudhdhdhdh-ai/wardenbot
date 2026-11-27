@@ -136,10 +136,7 @@ async def send_home(target, user):
     name = user.get("username") or user.get("first_name") or "участник"
     caption = (f"Привет, {name}! Это панель тимы «Warden Team». С помощью бота ты можешь взять ссылку, "
                "посмотреть статистику и запросить выплату. Нажимай кнопки ниже и пользуйся ботом.")
-    if MAIN_MENU_PHOTO_ID:
-        await target.answer_photo(MAIN_MENU_PHOTO_ID, caption=caption, reply_markup=main_kb())
-    else:
-        await target.answer_photo(MAIN_MENU_PHOTO_ID, caption=caption, reply_markup=main_kb())
+    await target.answer_photo(MAIN_MENU_PHOTO_ID, caption=caption, reply_markup=main_kb())
 
 @dp.message(CommandStart())
 async def start(m: Message, state: FSMContext):
@@ -183,7 +180,7 @@ async def on_membership_update(event: ChatMemberUpdated):
             u = await user_row(member.id)
             if u and not u["banned"]:
                 try:
-                    await bot.send_message(member.id, "Вы вступили в Warden Team! Открываю панель.", reply_markup=main_kb())
+                    await bot.send_photo(member.id, MAIN_MENU_PHOTO_ID, caption="Вы вступили в Warden Team! Открываю панель.", reply_markup=main_kb())
                 except Exception as exc:
                     log.info("Could not DM joining user %s: %s", member.id, exc)
 

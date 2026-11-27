@@ -80,7 +80,7 @@ async def listing(c: CallbackQuery):
     if problem:
         return await c.answer(problem, show_alert=True)
     rows = await app.db.all(
-        "SELECT id,label,phone FROM accounts WHERE account_class=? AND status='free' ORDER BY id LIMIT 10", (cls,))
+        "SELECT id,label,phone FROM accounts WHERE account_class=? AND status='free' AND available_for_issue=1 ORDER BY id LIMIT 10", (cls,))
     if not rows:
         return await c.answer("Свободных аккаунтов этого типа нет", show_alert=True)
     buttons = [[(f"#{r['id']} {mask(r['phone'])} · {r['label'][:20]}", f"uacc_take:{r['id']}")] for r in rows]
@@ -94,8 +94,8 @@ async def take(c: CallbackQuery):
     acc_id = int(c.data.split(":")[1])
     user = await app.user_row(c.from_user.id)
     acc = await app.db.one("SELECT * FROM accounts WHERE id=?", (acc_id,))
-    if not user or not acc:
-        return await c.answer("Аккаунт не найден", show_alert=True)
+    if not user or not acc or not acc["available_for_issue"]:
+        return await c.answer("Аккаунт больше не доступен для выдачи", show_alert=True)
     problem = await role_ok(user, acc["account_class"])
     if problem:
         return await c.answer(problem, show_alert=True)

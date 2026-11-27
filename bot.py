@@ -463,7 +463,10 @@ async def read_news(c: CallbackQuery):
     if n["url"]:
         body += ("\n\n" if body else "") + str(n["url"]).strip()
     stamp = f"\n\nОпубликовано: {n['created_at']}" if n["created_at"] else ""
-    await edit_panel(c, f"🗞 {n['title']}\n\n{body}{stamp}", reply_markup=kb([[("К списку новостей", "news")], [("В меню", "home")]]))
+    article = '🗞 ' + str(n['title']) + '\n\n' + body + stamp
+    if len(article) > 4000:
+        article = article[:3950] + '\n\n…Текст сокращён.'
+    await edit_panel(c, article, reply_markup=kb([[('К списку новостей', 'news')], [('В меню', 'home')]]))
 
 @dp.callback_query(F.data == "team")
 async def team_menu(c: CallbackQuery):

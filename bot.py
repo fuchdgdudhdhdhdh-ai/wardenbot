@@ -424,16 +424,29 @@ async def take_link(c: CallbackQuery):
 
 @dp.callback_query(F.data == "news")
 async def news(c: CallbackQuery):
-    items = await db.all("SELECT * FROM news ORDER BY id DESC LIMIT 20")
-    await edit_panel(c, "Ознакомиться с актуальными данными, конкурсами или прайсами можно тут:",
-                           reply_markup=kb([[ (x["title"],f"readnews:{x['id']}")] for x in items] + [[("Назад ↩️","home")]]))
     await c.answer()
+    items = await db.all("SELECT id,title,created_at FROM news ORDER BY id DESC LIMIT 20")
+    if not items:
+        return await edit_panel(c, "Пока новостей нет.", reply_markup=back_menu())
+    rows = [[(str(x["title"])[:60], f"readnews:{x['id']}")] for x in items]
+    rows.append([("Назад ↩️", "home")])
+    await edit_panel(c, "Актуальные новости. Нажмите на заголовок, чтобы открыть публикацию:", reply_markup=kb(rows))
 
 @dp.callback_query(F.data.startswith("readnews:"))
 async def read_news(c: CallbackQuery):
-    n = await db.one("SELECT * FROM news WHERE id=?",(int(c.data.split(":")[1]),))
-    if n: await edit_panel(c, n["title"]+"\n\n"+n["body"]+("\n"+n["url"] if n["url"] else ""),reply_markup=back_menu())
+    try:
+        news_id = int(c.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        return await c.answer("Некорректная новость", show_alert=True)
+    n = await db.one("SELECT id,title,body,url,created_at FROM news WHERE id=?", (news_id,))
+    if not n:
+        return await c.answer("Новость не найдена или уже удалена", show_alert=True)
     await c.answer()
+    body = (n["body"] or "").strip()
+    if n["url"]:
+        body += ("\n\n" if body else "") + str(n["url"]).strip()
+    stamp = f"\n\nОпубликовано: {n['created_at']}" if n["created_at"] else ""
+    await edit_panel(c, f"🗞 {n['title']}\n\n{body}{stamp}", reply_markup=kb([[("К списку новостей", "news")], [("В меню", "home")]]))
 
 @dp.callback_query(F.data == "team")
 async def team_menu(c: CallbackQuery):

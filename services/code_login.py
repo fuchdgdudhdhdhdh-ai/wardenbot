@@ -5,7 +5,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import (
     SessionPasswordNeededError, PhoneCodeInvalidError, PhoneCodeExpiredError,
-    FloodWaitError, AuthError, ApiIdInvalidError, PhoneNumberInvalidError,
+    FloodWaitError, ApiIdInvalidError, PhoneNumberInvalidError, PasswordHashInvalidError,
 )
 from telethon.tl.types import SentCodeTypeApp, SentCodeTypeSms, SentCodeTypeCall, SentCodeTypeFlashCall
 from services.crypto import encrypt, decrypt
@@ -140,7 +140,7 @@ class CodeLoginManager:
             client = await self._client(row)
             try:
                 await client.sign_in(password=password)
-            except AuthError as exc:
+            except PasswordHashInvalidError as exc:
                 await self.db.run("UPDATE account_logins SET attempts=attempts+1 WHERE id=?", (login_id,))
                 raise CodeLoginError("Пароль не принят.") from exc
             return await self._finish(row, client)

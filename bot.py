@@ -583,31 +583,56 @@ async def team_delete(c:CallbackQuery):
         await db.run("DELETE FROM teams WHERE id=?",(t["id"],))
     await edit_panel(c, "Команда расформирована.",reply_markup=back_menu()); await c.answer()
 
-@dp.callback_query(F.data=="team_stats")
-async def team_stats(c:CallbackQuery):
-    u=await user_row(c.from_user.id)
-    t=await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
-    if not t: return await c.answer("Вы не состоите в команде",show_alert=True)
-    members=await db.all("SELECT id,first_name,username FROM users WHERE team_id=? ORDER BY id",(t["id"],))
-    member_ids=[x["id"] for x in members]
-    links=await db.all("SELECT l.id,l.url,l.assigned_user,o.title FROM links l LEFT JOIN offers o ON o.id=l.offer_id WHERE l.assigned_user IN (SELECT id FROM users WHERE team_id=?) ORDER BY l.id DESC",(t["id"],))
-    total_leads=0
-    lines=[]
-    for link in links:
-        stats=await db.one("SELECT COALESCE(SUM(delta),0) n FROM lead_log WHERE link_id=?",(link["id"],))
-        total_leads += stats["n"]
-        owner=next((x for x in members if x["id"]==link["assigned_user"]),None)
-        label=(owner["first_name"] if owner else str(link["assigned_user"]))
-        lines.append(f"#{link['id']} · {label} · {link['title'] or 'оффер'} · {stats['n']} лидов")
-    profit=await db.one("SELECT COALESCE(SUM(amount),0) n FROM payout_requests p JOIN users u ON u.id=p.user_id WHERE u.team_id=? AND p.status='paid'",(t["id"],))
-    created=datetime.fromisoformat(t["created_at"]); created=created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created
-    age=max(0,(datetime.now(timezone.utc)-created).days)
-    body=(f"Команда: {t['name']} ({t['tag']})\nУчастников: {len(members)}\nСсылок: {len(links)}\n"
-          f"Всего лидов по ссылкам команды: {total_leads}\nОплачено участникам: ${profit['n']:.1f}\n"
-          f"Возраст команды: {age} дней\nРейтинг: {await team_rating(t['id'])}%")
-    if lines: body += "\n\nСсылки участников:\n" + "\n".join(lines[:35])
-    await edit_panel(c,body,reply_markup=back_menu())
+async def render_team_stats(c: CallbackQuery, offset: int = 0):
+    u = await user_row(c.from_user.id)
+    t = await db.one("SELECT * FROM teams WHERE id=?", (u["team_id"],)) if u and u["team_id"] else None
+    if not t:
+        return await c.answer("Вы не состоите в команде", show_alert=True)
+    members = await db.all("SELECT id,first_name,username FROM users WHERE team_id=? ORDER BY id", (t["id"],))
+    links = await db.all("""SELECT l.id,l.url,l.assigned_user,o.title,COALESCE(SUM(ll.delta),0) leads
+                            FROM links l LEFT JOIN offers o ON o.id=l.offer_id
+                            LEFT JOIN lead_log ll ON ll.link_id=l.id
+                            WHERE l.assigned_user IN (SELECT id FROM users WHERE team_id=?)
+                            GROUP BY l.id,l.url,l.assigned_user,o.title ORDER BY l.id DESC""", (t["id"],))
+    total_leads = sum(int(x["leads"] or 0) for x in links)
+    paid = await db.one("SELECT COALESCE(SUM(p.amount),0) n FROM payout_requests p JOIN users u ON u.id=p.user_id WHERE u.team_id=? AND p.status='paid'", (t["id"],))
+    created = datetime.fromisoformat(t["created_at"])
+    created = created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created
+    age = max(0, (datetime.now(timezone.utc) - created).days)
+    page_size = 15
+    offset = max(0, offset)
+    page = links[offset:offset + page_size]
+    member_names = {x["id"]: (x["first_name"] or x["username"] or str(x["id"])) for x in members}
+    body = (f"Команда: {t['name']} ({t['tag']})\\nУчастников: {len(members)}\\nСсылок: {len(links)}\\n"
+            f"Всего лидов по ссылкам команды: {total_leads}\\nОплачено участникам: ${paid['n']:.1f}\\n"
+            f"Возраст команды: {age} дней\\nРейтинг: {await team_rating(t['id'])}%")
+    if page:
+        body += f"\\n\\nСсылки {offset + 1}–{offset + len(page)} из {len(links)}:"
+        for link in page:
+            owner = member_names.get(link["assigned_user"], str(link["assigned_user"]))
+            url = (link["url"] or "")[:100]
+            body += f"\\n\\n#{link['id']} · {owner} · {link['title'] or 'оффер'} · {link['leads']} лидов\\n{url}"
+    else:
+        body += "\\n\\nУ команды пока нет активных или выданных ссылок."
+    rows = []
+    nav = []
+    if offset > 0: nav.append(("⬅️ Назад", f"team_stats:{max(0, offset - page_size)}"))
+    if offset + page_size < len(links): nav.append(("Дальше ➡️", f"team_stats:{offset + page_size}"))
+    if nav: rows.append(nav)
+    rows.append([("Назад ↩️", "team")])
+    await edit_panel(c, body, reply_markup=kb(rows))
     await c.answer()
+
+@dp.callback_query(F.data == "team_stats")
+async def team_stats(c: CallbackQuery):
+    await render_team_stats(c, 0)
+
+@dp.callback_query(F.data.startswith("team_stats:"))
+async def team_stats_page(c: CallbackQuery):
+    try: offset = int(c.data.split(":", 1)[1])
+    except (ValueError, IndexError): return await c.answer("Некорректная страница", show_alert=True)
+    await render_team_stats(c, offset)
+
 @dp.callback_query(F.data=="events")
 async def events(c:CallbackQuery):
     u=await user_row(c.from_user.id)

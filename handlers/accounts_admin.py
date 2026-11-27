@@ -110,14 +110,17 @@ async def phone_entered(m: Message, state: FSMContext):
         return await m.answer("Нужен номер из 10–15 цифр, например +79991234567.")
     phone = "+" + digits
     try:
-        login_id, note, _timeout, code_len = await app.code_login.start(m.from_user.id, phone)
+        login_id, note, timeout, code_len = await app.code_login.start(m.from_user.id, phone)
     except FloodWaitError as exc:
         return await m.answer(f"Telegram просит подождать {exc.seconds} сек. и повторить.")
     except CodeLoginError as exc:
         return await m.answer(f"Не удалось отправить код: {exc}")
+    except Exception as exc:
+        log.exception("Не удалось начать вход для добавления аккаунта")
+        return await m.answer(f"Не удалось начать вход ({type(exc).__name__}). Проверьте API_ID/API_HASH и подключение сервера.")
     await state.set_state(AddFlow.code)
     await state.update_data(login_id=login_id, buf="", code_len=code_len)
-    await m.answer(f"Код для {phone} отправлен: {note}. Если код приходит в Telegram, откройте аккаунт, который добавляете, и найдите сообщение от Telegram.\n\nВведите код кнопками ниже.",
+    await m.answer(f"Код для {phone} отправлен: {note}. Срок ожидания: {timeout} сек., длина кода: {code_len}. Если код приходит в Telegram, откройте именно добавляемый аккаунт и найдите сообщение от Telegram.\n\nВведите код кнопками ниже.",
                    reply_markup=keypad(""))
 
 
@@ -186,6 +189,9 @@ async def code_button(c: CallbackQuery, state: FSMContext):
             return await c.answer(f"Подождите {exc.seconds} сек.", show_alert=True)
         except (CodeLoginError, LoginNotFound, NotYourLogin) as exc:
             return await c.answer(str(exc), show_alert=True)
+        except Exception as exc:
+            log.exception("Не удалось повторно запросить код входа")
+            return await c.answer(f"Ошибка повторной отправки ({type(exc).__name__})", show_alert=True)
         await state.update_data(buf="", code_len=code_len)
         await redraw(c, state, text=f"Код отправлен заново. {note}.")
         return await c.answer("Отправлено")

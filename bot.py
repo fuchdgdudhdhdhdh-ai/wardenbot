@@ -25,6 +25,18 @@ SUPERADMIN_ID = int(os.getenv("SUPERADMIN_ID", "7696380514"))
 INVITE = os.getenv("TEAM_INVITE", "https://t.me/+doX9--B6L-dmYzZi")
 # Фоновое изображение входит в Docker-образ и отправляется как локальный файл.
 MAIN_MENU_PHOTO_PATH = Path(__file__).resolve().parent / "assets" / "main_menu.jpg"
+
+def main_menu_photo_is_valid() -> bool:
+    """Проверяет целостность JPEG до отправки в Telegram."""
+    try:
+        with MAIN_MENU_PHOTO_PATH.open("rb") as photo:
+            header = photo.read(3)
+            photo.seek(-2, 2)
+            footer = photo.read(2)
+        return header == b"\\xff\\xd8\\xff" and footer == b"\\xff\\xd9"
+    except (OSError, ValueError):
+        return False
+
 OFFERS_VIDEO_ID = os.getenv("OFFERS_VIDEO_ID", "")
 db = DB(os.getenv("DATABASE_PATH", "warden.db"))
 bot = Bot(TOKEN)
@@ -137,13 +149,13 @@ async def send_home(target, user):
     name = user.get("username") or user.get("first_name") or "участник"
     caption = (f"Привет, {name}! Это панель тимы «Warden Team». С помощью бота ты можешь взять ссылку, "
                "посмотреть статистику и запросить выплату. Нажимай кнопки ниже и пользуйся ботом.")
-    if MAIN_MENU_PHOTO_PATH.is_file():
+    if main_menu_photo_is_valid():
         try:
             return await target.answer_photo(FSInputFile(str(MAIN_MENU_PHOTO_PATH)), caption=caption, reply_markup=main_kb())
-        except Exception:
-            log.exception("Не удалось отправить фото главного меню; использую текстовый вариант")
+        except Exception as exc:
+            log.warning("Telegram отклонил фото главного меню (%s); использую текстовый вариант", type(exc).__name__)
     else:
-        log.error("Файл фото главного меню не найден: %s", MAIN_MENU_PHOTO_PATH)
+        log.warning("Фото главного меню отсутствует или повреждено; использую текстовый вариант")
     return await target.answer(caption, reply_markup=main_kb())
 
 @dp.message(CommandStart())
@@ -630,7 +642,7 @@ async def admin(m:Message):
                        [("Заявки 💰","adm_payouts")],[("🕴️Добавить администрацию","adm_add")],
                        [("Новости 🗞","adm_news")],[("🚚 Завоз аккаунтов","adm_stock")]])
     try:
-        if MAIN_MENU_PHOTO_PATH.is_file():
+        if main_menu_photo_is_valid():
             await m.answer_photo(FSInputFile(str(MAIN_MENU_PHOTO_PATH)), caption=admin_caption, reply_markup=admin_markup)
         else:
             await m.answer(admin_caption, reply_markup=admin_markup)

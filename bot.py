@@ -604,9 +604,8 @@ async def demo_take(c: CallbackQuery):
         slot = await cur.fetchone()
         if not slot:
             return None
-        await conn.execute("UPDATE demo_account_slots SET status='assigned',assigned_user=?,assigned_at=? WHERE id=? AND status='available'", (c.from_user.id, now(), slot['id']))
-        cur = await conn.execute("SELECT changes()")
-        if (await cur.fetchone())[0] != 1:
+        cur = await conn.execute("UPDATE demo_account_slots SET status='assigned',assigned_user=?,assigned_at=? WHERE id=? AND status='available' RETURNING id", (c.from_user.id, now(), slot['id']))
+        if not await cur.fetchone():
             return None
         return dict(slot)
     slot = await db.transaction(allocate)

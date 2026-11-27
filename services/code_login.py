@@ -89,9 +89,10 @@ class CodeLoginManager:
         except PhoneNumberInvalidError as exc:
             await client.disconnect()
             raise CodeLoginError("Telegram не принял номер. Проверьте формат.") from exc
-        except Exception:
+        except Exception as exc:
             await client.disconnect()
-            raise
+            log.exception("Telegram не отправил код для номера %s", phone)
+            raise CodeLoginError(f"Telegram не отправил код ({type(exc).__name__}): {exc}") from exc
         temp_session = encrypt(StringSession.save(client.session))
         login_id = await self.db.run(
             """INSERT INTO account_logins(admin_id,phone,api_id,api_hash,phone_code_hash,temp_session_enc,created_at,expires_at)
@@ -109,7 +110,13 @@ class CodeLoginManager:
         async with self._lock(login_id):
             row = await self._row(login_id, admin_id)
             client = await self._client(row)
-            sent = await asyncio.wait_for(client.send_code_request(row["phone"]), 40)
+            try:
+                sent = await asyncio.wait_for(client.send_code_request(row["phone"]), 40)
+            except FloodWaitError:
+                raise
+            except Exception as exc:
+                log.exception("Не удалось повторно запросить код для входа %s", login_id)
+                raise CodeLoginError(f"Telegram не отправил новый код ({type(exc).__name__}): {exc}") from exc
             await self.db.run("""UPDATE account_logins SET phone_code_hash=?,expires_at=?,state='code',attempts=0
                                  WHERE id=?""",
                               (sent.phone_code_hash, (_now() + timedelta(minutes=LOGIN_TTL_MIN)).isoformat(), login_id))

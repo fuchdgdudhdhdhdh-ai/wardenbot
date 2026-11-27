@@ -6,6 +6,8 @@ log = logging.getLogger(__name__)
 class AccountBusy(RuntimeError): pass
 class NotYourAccount(RuntimeError): pass
 class LeaseExpired(RuntimeError): pass
+class AccountLimit(RuntimeError): pass
+class AccountUnavailable(RuntimeError): pass
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -36,6 +38,44 @@ class LeaseService:
         await self.pool.disconnect(acc_id)
         await self._event(acc_id, user_id, "take")
         return token
+
+    async def take_for_class(self, acc_id: int, user_id: int, account_class: str, ttl_min: int = None) -> str:
+        """Atomically lease an account while enforcing one active lease per class."""
+        if account_class not in ("ordinary", "premium"):
+            raise AccountUnavailable("Неизвестный тип аккаунта.")
+        now = utcnow()
+        until = now + timedelta(minutes=ttl_min or self.ttl_min)
+        token = secrets.token_urlsafe(32)
+
+        async def op(conn):
+            cur = await conn.execute(
+                "SELECT account_class,status,leased_by,lease_until FROM accounts WHERE id=?",
+                (acc_id,),
+            )
+            account = await cur.fetchone()
+            if not account or account["account_class"] != account_class or account["status"] in ("disabled", "dead"):
+                raise AccountUnavailable("Этот аккаунт недоступен. Обновите список и попробуйте другой.")
+            cur = await conn.execute(
+                """SELECT id FROM accounts WHERE leased_by=? AND account_class=? AND status='leased'
+                   AND id<>? AND lease_until>? LIMIT 1""",
+                (user_id, account_class, acc_id, _stamp(now)),
+            )
+            if await cur.fetchone():
+                raise AccountLimit("У вас уже есть активная аренда этого типа аккаунтов.")
+            cur = await conn.execute(
+                """UPDATE accounts SET status='leased',leased_by=?,lease_token=?,leased_at=?,lease_until=?
+                   WHERE id=? AND account_class=? AND status IN ('free','leased')
+                   AND (status='free' OR leased_by=? OR lease_until IS NULL OR lease_until<=?)""",
+                (user_id, token, _stamp(now), _stamp(until), acc_id, account_class, user_id, _stamp(now)),
+            )
+            if cur.rowcount != 1:
+                raise AccountBusy("Аккаунт занят другим пользователем.")
+            return token
+
+        result = await self.db.transaction(op)
+        await self.pool.disconnect(acc_id)
+        await self._event(acc_id, user_id, "take", account_class)
+        return result
 
     async def guard_lease(self, acc_id, user_id):
         row = await self.db.one("SELECT leased_by,lease_until,status FROM accounts WHERE id=?", (acc_id,))

@@ -92,11 +92,22 @@ def back_menu():
 async def edit_panel(c: CallbackQuery, text: str, reply_markup=None, **kwargs):
     msg = c.message
     if msg.photo or msg.video or msg.animation:
+        # Telegram caption limit is 1024 chars; long news/events must become text messages.
+        if len(text) > 1024:
+            try:
+                await msg.delete()
+            except Exception:
+                log.debug("Не удалось удалить старую карточку перед длинным текстом", exc_info=True)
+            return await bot.send_message(msg.chat.id, text, reply_markup=reply_markup, **kwargs)
         try:
             return await msg.edit_caption(caption=text, reply_markup=reply_markup, **kwargs)
         except Exception as exc:
             if "message is not modified" in str(exc).lower():
                 return msg
+            if "caption" in str(exc).lower() and "too long" in str(exc).lower():
+                try: await msg.delete()
+                except Exception: pass
+                return await bot.send_message(msg.chat.id, text[:4000], reply_markup=reply_markup, **kwargs)
             raise
     try:
         return await msg.edit_text(text, reply_markup=reply_markup, **kwargs)

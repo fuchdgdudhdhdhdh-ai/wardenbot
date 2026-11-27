@@ -1,5 +1,6 @@
 """Импорт авторизованных сессий Telethon и Pyrogram."""
 import asyncio, json, os, shutil, sqlite3, tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -21,14 +22,15 @@ class SessionImporter:
         if old:
             await self.pool.disconnect(old["id"])
         username = getattr(me, "username", None)
+        created_at = datetime.now(timezone.utc).isoformat()
         await self.db.run("""INSERT INTO accounts(label,api_id,api_hash,session_enc,phone,tg_user_id,tg_username,
-            status,added_by,client_type) VALUES(?,?,?,?,?,?,?,'free',?,?)
+            status,added_by,client_type,created_at) VALUES(?,?,?,?,?,?,?,'free',?,?,?)
             ON CONFLICT(tg_user_id) WHERE tg_user_id IS NOT NULL DO UPDATE SET
             label=excluded.label,api_id=excluded.api_id,api_hash=excluded.api_hash,session_enc=excluded.session_enc,
             phone=excluded.phone,tg_username=excluded.tg_username,status='free',leased_by=NULL,lease_token=NULL,
             leased_at=NULL,lease_until=NULL,added_by=excluded.added_by,client_type=excluded.client_type""",
             (label or f"Аккаунт {me.id}", int(api_id), api_hash, encrypt(session_string), phone,
-             int(me.id), username, self.added_by, client_type))
+             int(me.id), username, self.added_by, client_type, created_at))
         row = await self.db.one("SELECT id FROM accounts WHERE tg_user_id=?", (int(me.id),))
         await self.db.run("INSERT INTO account_events(account_id,user_id,action,detail) VALUES(?,?,?,?)",
                           (row["id"], self.added_by, action, f"Импортирован {client_type}; tg_user_id={me.id}"))

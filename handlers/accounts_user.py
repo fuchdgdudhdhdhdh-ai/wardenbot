@@ -50,7 +50,9 @@ async def render_catalog(c: CallbackQuery):
         await app.edit_panel(c, "Раздел аккаунтов ещё не настроен администрацией.",
                              reply_markup=app.kb([[("Назад ↩️", "home")]]))
         return await c.answer()
-    stats = await app.db.account_stats()
+    visible = await app.db.all("SELECT account_class,COUNT(*) n FROM accounts WHERE status='free' AND available_for_issue=1 GROUP BY account_class")
+    visible_counts = {row["account_class"]: row["n"] for row in visible}
+    stats = {"ordinary": {"free": visible_counts.get("ordinary", 0)}, "premium": {"free": visible_counts.get("premium", 0)}}
     leases = await app.db.active_leases(c.from_user.id)
     mine = ""
     if leases:

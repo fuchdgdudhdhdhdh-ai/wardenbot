@@ -1288,13 +1288,10 @@ async def news_body(m:Message,state:FSMContext):
 async def balance_plus(m: Message):
     if not await require_admin(m): return await deny_admin_command(m)
     parts = (m.text or "").split()
-    if len(parts) == 2:
-        uid = m.reply_to_message.from_user.id if m.reply_to_message else m.from_user.id
-        raw_amount = parts[1]
-    elif len(parts) == 3 and parts[1].isdigit():
-        uid, raw_amount = int(parts[1]), parts[2]
+    if len(parts) == 3 and parts[2].isdigit():
+        raw_amount, uid = parts[1], int(parts[2])
     else:
-        return await m.answer("Формат: ответьте на сообщение пользователя командой /plus сумма или используйте /plus ID сумма")
+        return await m.answer("Формат: /plus сумма ID_пользователя\nПример: /plus 10.5 123456789")
     try: amount = Decimal(raw_amount.replace(",", ".")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
     except Exception: return await m.answer("Сумма должна быть числом, например /plus 10.5")
     if amount <= 0: return await m.answer("Сумма должна быть больше нуля.")
@@ -1308,13 +1305,10 @@ async def balance_plus(m: Message):
 async def balance_minus(m: Message):
     if not await require_admin(m): return await deny_admin_command(m)
     parts = (m.text or "").split()
-    if len(parts) == 2:
-        uid = m.reply_to_message.from_user.id if m.reply_to_message else m.from_user.id
-        raw_amount = parts[1]
-    elif len(parts) == 3 and parts[1].isdigit():
-        uid, raw_amount = int(parts[1]), parts[2]
+    if len(parts) == 3 and parts[2].isdigit():
+        raw_amount, uid = parts[1], int(parts[2])
     else:
-        return await m.answer("Формат: ответьте на сообщение пользователя командой /minus сумма или используйте /minus ID сумма")
+        return await m.answer("Формат: /minus сумма ID_пользователя\nПример: /minus 10.5 123456789")
     try: amount = Decimal(raw_amount.replace(",", ".")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
     except Exception: return await m.answer("Сумма должна быть числом, например /minus 10.5")
     if amount <= 0: return await m.answer("Сумма должна быть больше нуля.")

@@ -308,7 +308,10 @@ async def login_code(c: CallbackQuery):
     await c.answer("Запрашиваю код…")
     try:
         client = await app.client_pool_service.get(acc_id)
-        await client.send_code_request(acc["phone"])
+        if hasattr(client, "send_code_request"):
+            await client.send_code_request(acc["phone"])
+        else:
+            await client.send_code(acc["phone"])
     except FloodWaitError as exc:
         return await c.message.answer(f"Telegram просит подождать {exc.seconds} сек.")
     except Exception as exc:
@@ -327,22 +330,36 @@ async def login_code(c: CallbackQuery):
 
 
 async def wait_code(client):
-    last = 0
+    """Read the newest Telegram service message for either Telethon or Pyrogram."""
+    is_telethon = hasattr(client, "iter_messages")
     try:
-        recent = await client.get_messages(777000, limit=1)
-        if recent:
-            last = recent[0].id
+        if is_telethon:
+            recent = await client.get_messages(777000, limit=1)
+            last = recent[0].id if recent else 0
+        else:
+            recent = []
+            async for message in client.get_chat_history(777000, limit=1):
+                recent.append(message)
+            last = recent[0].id if recent else 0
     except Exception:
+        log.exception("Не удалось прочитать сервисный чат Telegram")
         return None
+
     for _ in range(12):
         await asyncio.sleep(2)
         try:
-            messages = await client.get_messages(777000, limit=5, min_id=last)
+            if is_telethon:
+                messages = await client.get_messages(777000, limit=5, min_id=last)
+            else:
+                messages = []
+                async for message in client.get_chat_history(777000, limit=5):
+                    if message.id > last:
+                        messages.append(message)
         except Exception:
             continue
         for msg in messages:
             message_text = getattr(msg, "message", None) or getattr(msg, "text", None) or ""
-            found = re.search(r"(?<!\d)(\d{5,6})(?!\d)", message_text)
+            found = re.search(r"(?<!\\d)(\\d{5,6})(?!\\d)", message_text)
             if found:
                 return found.group(1)
     return None

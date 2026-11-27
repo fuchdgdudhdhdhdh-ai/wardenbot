@@ -259,55 +259,6 @@ class DB:
             return [dict(x) for x in await cur.fetchall()]
 
 
-    async def init(self):
-        # Render Persistent Disk монтируется в /var/data; создаём каталог при локальном запуске тоже.
-        Path(self.path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self.path, timeout=15) as db:
-            await db.executescript(SCHEMA)
-            # Backward-compatible migration from the initial prototype database.
-            cols = {row[1] for row in await (await db.execute("PRAGMA table_info(payout_requests)")).fetchall()}
-            if "admin_id" not in cols:
-                await db.execute("ALTER TABLE payout_requests ADD COLUMN admin_id INTEGER")
-            if "mentor_id" not in cols:
-                await db.execute("ALTER TABLE payout_requests ADD COLUMN mentor_id INTEGER")
-            acc_cols = {row[1] for row in await (await db.execute("PRAGMA table_info(accounts)")).fetchall()}
-            acc_migrations = {
-                "account_class": "TEXT NOT NULL DEFAULT 'ordinary'",
-                "twofa_enc": "BLOB",
-                "twofa_shared": "INTEGER NOT NULL DEFAULT 0",
-                "client_type": "TEXT NOT NULL DEFAULT 'telethon'",
-                "proxy": "TEXT",
-                "note": "TEXT",
-                "last_used_at": "TEXT",
-                "last_check_at": "TEXT",
-                "check_failures": "INTEGER NOT NULL DEFAULT 0",
-            }
-            for column, ddl in acc_migrations.items():
-                if column not in acc_cols:
-                    await db.execute(f"ALTER TABLE accounts ADD COLUMN {column} {ddl}")
-            await db.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('channel','')")
-            await db.commit()
-
-    async def run(self, sql, args=()):
-        async with aiosqlite.connect(self.path) as db:
-            db.row_factory = aiosqlite.Row
-            cur = await db.execute(sql, args)
-            await db.commit()
-            return cur.lastrowid
-
-    async def one(self, sql, args=()):
-        async with aiosqlite.connect(self.path) as db:
-            db.row_factory = aiosqlite.Row
-            cur = await db.execute(sql, args)
-            row = await cur.fetchone()
-            return dict(row) if row else None
-
-    async def all(self, sql, args=()):
-        async with aiosqlite.connect(self.path) as db:
-            db.row_factory = aiosqlite.Row
-            cur = await db.execute(sql, args)
-            return [dict(x) for x in await cur.fetchall()]
-
     async def register(self, u, mentor_id=None):
         async def op(conn):
             cur = await conn.execute("SELECT * FROM users WHERE id=?", (u.id,))

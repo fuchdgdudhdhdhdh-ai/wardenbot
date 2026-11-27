@@ -735,8 +735,7 @@ ROLE_LEVEL = {"Новичок": 0, "Трафер": 1, "Опытный": 2, "На
 async def free_accounts(c: CallbackQuery):
     u = await user_row(c.from_user.id)
     if not u or ROLE_LEVEL.get(u["role"], 0) < ROLE_LEVEL["Трафер"]:
-        await edit_panel(c, 'Бесплатные аккаунты доступны с должности «Трафер». Повысите должность, чтобы открыть каталог.', reply_markup=back_menu())
-        return await c.answer()
+        return await c.answer('Бесплатные аккаунты доступны с должности «Трафер». Повысите должность, чтобы открыть каталог.', show_alert=True)
     from handlers import accounts_user
     await accounts_user.render_catalog(c)
 

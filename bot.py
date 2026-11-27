@@ -622,8 +622,8 @@ async def event_open(c:CallbackQuery):
     can_delete=bool(e and (await require_admin(c) or (t and t["id"]==e["team_id"] and t["owner_id"]==c.from_user.id)))
     buttons=([[("Удалить ✖️",f"eventdel:{e['id']}")]] if can_delete else [])
     buttons.append([("Назад ↩️","my_events")])
-    if e: await edit_panel(c,e["title"]+"\n\n"+e["body"],reply_markup=kb(buttons))
-    else: await c.answer("Мероприятие не найдено",show_alert=True)
+    if not e: return await c.answer("Мероприятие не найдено",show_alert=True)
+    await edit_panel(c,e["title"]+"\n\n"+e["body"],reply_markup=kb(buttons))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("eventdel:"))
@@ -880,7 +880,7 @@ async def admin_user(c:CallbackQuery):
     current_link = await db.one("SELECT id,url FROM links WHERE id=? AND assigned_user=?", (u["current_link_id"], uid)) if u["current_link_id"] else None
     paid=await db.one("SELECT COALESCE(SUM(amount),0) n FROM payout_requests WHERE user_id=? AND status='paid'",(uid,))
     link_info = f"\nТекущая ссылка: #{current_link['id']} — {current_link['url']}" if current_link else "\nТекущая ссылка: нет"
-    await edit_panel(c, f"Участник {u['first_name']} (@{u['username'] or 'нет'})\nID: {uid}\nРегистрация: {u['joined_at']}\nВзято ссылок: {count['n']}{link_info}\nЗаработал: ${paid['n']:.2f}\nДолжность: {u['role']}",
+    await edit_panel(c, f"Участник {u['first_name']} (@{u['username'] or 'нет'})\nID: {uid}\nРегистрация: {u['joined_at']}\nВзято ссылок: {count['n']}{link_info}\nЗаработал: ${paid['n']:.1f}\nБаланс: ${u.get('balance',0):.1f}\nДолжность: {u['role']}",
       reply_markup=kb([[("Бан ⛔",f"ban:{uid}")],[("Ограничить доступ ⚠️",f"restrict:{uid}")],
                        [("Забрать ссылку🫴",f"revoke:{uid}")],[("Управление должностью🚀",f"role:{uid}")],
                        [("Назад↩️","adm_users")]]))

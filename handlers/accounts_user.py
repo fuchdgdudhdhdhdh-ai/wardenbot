@@ -104,6 +104,8 @@ async def take(c: CallbackQuery):
     except (AccountBusy, AccountLimit, AccountUnavailable) as exc:
         return await c.answer(str(exc), show_alert=True)
     await app.db.audit(c.from_user.id, "account_taken", acc_id)
+    await app.notify_admins("взял аккаунт", c.from_user.id,
+                            f"Аккаунт #{acc_id} · {CLASS_RU[acc['account_class']]} · {mask(acc['phone'])}")
     await c.answer("Аккаунт ваш")
     await panel_edit(c, acc_id, c.from_user.id)
 

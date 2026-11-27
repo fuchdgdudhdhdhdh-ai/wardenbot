@@ -5,3 +5,4 @@ python-dotenv>=1.0
 telethon>=1.36,<2.0
 pyrogram>=2.0.106
 cryptography>=42
+asyncpg>=0.29,<1.0

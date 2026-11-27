@@ -119,12 +119,12 @@ class CodeLoginManager:
         await self.db.run("UPDATE account_logins SET temp_session_enc=? WHERE id=?",
                           (encrypt(StringSession.save(client.session)), login_id))
 
-    async def resend(self, login_id, admin_id):
+    async def resend(self, login_id, admin_id, force_sms=False):
         async with self._lock(login_id):
             row = await self._row(login_id, admin_id)
             client = await self._client(row)
             try:
-                sent = await asyncio.wait_for(client.send_code_request(row["phone"]), 40)
+                sent = await asyncio.wait_for(client.send_code_request(row["phone"], force_sms=force_sms), 40)
             except FloodWaitError:
                 raise
             except Exception as exc:

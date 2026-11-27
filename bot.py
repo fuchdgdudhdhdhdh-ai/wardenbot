@@ -306,6 +306,36 @@ async def admin_ids():
     rows = await db.all("SELECT user_id FROM admins")
     return list({OWNER_ID, *[x["user_id"] for x in rows]})
 
+
+async def admin_logging_enabled():
+    row = await db.one("SELECT value FROM settings WHERE key='admin_logging'")
+    return bool(row and row["value"] == "1")
+
+
+async def notify_admins(event: str, user_id: int, details: str = ""):
+    if not await admin_logging_enabled():
+        return
+    user = await user_row(user_id)
+    who = f"{user['first_name']} (@{user['username'] or 'нет'}) · ID {user_id}" if user else f"ID {user_id}"
+    message = f"🔔 Событие: {event}\nПользователь: {who}"
+    if details:
+        message += f"\n{details}"
+    for admin_id in await admin_ids():
+        try:
+            await bot.send_message(admin_id, message)
+        except Exception as exc:
+            log.warning("Не удалось отправить лог администратору %s: %s", admin_id, exc)
+
+
+async def build_admin_keyboard():
+    enabled = await admin_logging_enabled()
+    label = "🟢 Логирование: ВКЛ" if enabled else "🔴 Логирование: ВЫКЛ"
+    return kb([[("Участники 👥","adm_users")],[("Выдать офер📥","adm_offers")],
+               [("Заявки 💰","adm_payouts")],[("🕴️Добавить администрацию","adm_add")],
+               [("Новости 🗞","adm_news")],[("🚚 Завоз аккаунтов","adm_stock")],
+               [("📲 Аккаунты","acc_menu")],[("🔎 Ссылки пользователей","adm_monitor")],
+               [(label,"adm_log_toggle")]])
+
 @dp.callback_query(F.data == "offers")
 async def offers(c: CallbackQuery):
     items = await db.all("SELECT * FROM offers WHERE active=1 ORDER BY id")
@@ -640,10 +670,7 @@ async def admin(m:Message):
     if not await require_admin(m):
         return await deny_admin_command(m)
     admin_caption = f"Добро пожаловать в админ-панель, {m.from_user.first_name}, используйте кнопки ниже:"
-    admin_markup = kb([[("Участники 👥","adm_users")],[("Выдать офер📥","adm_offers")],
-                       [("Заявки 💰","adm_payouts")],[("🕴️Добавить администрацию","adm_add")],
-                       [("Новости 🗞","adm_news")],[("🚚 Завоз аккаунтов","adm_stock")],
-                       [("📲 Аккаунты","acc_menu")]])
+    admin_markup = await build_admin_keyboard()
     try:
         if main_menu_photo_is_valid():
             await m.answer_photo(FSInputFile(str(MAIN_MENU_PHOTO_PATH)), caption=admin_caption, reply_markup=admin_markup)
@@ -654,13 +681,50 @@ async def admin(m:Message):
         await m.answer(admin_caption, reply_markup=admin_markup)
 
 
+@dp.callback_query(F.data == "admin_home")
+async def admin_home(c: CallbackQuery):
+    if not await require_admin(c):
+        return await c.answer("Нет доступа", show_alert=True)
+    await edit_panel(c, f"Админ-панель, {c.from_user.first_name}.", reply_markup=await build_admin_keyboard())
+    await c.answer()
+
+
+@dp.callback_query(F.data == "adm_log_toggle")
+async def admin_log_toggle(c: CallbackQuery):
+    if not await require_admin(c):
+        return await c.answer("Нет доступа", show_alert=True)
+    enabled = await admin_logging_enabled()
+    value = "0" if enabled else "1"
+    await db.run("INSERT INTO settings(key,value) VALUES('admin_logging',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (value,))
+    await edit_panel(c, "Логирование включено 🟢" if value == "1" else "Логирование выключено 🔴",
+                     reply_markup=await build_admin_keyboard())
+    await c.answer("Настройка сохранена")
+
+
+@dp.callback_query(F.data == "adm_monitor")
+async def admin_link_monitor(c: CallbackQuery):
+    if not await require_admin(c):
+        return await c.answer("Нет доступа", show_alert=True)
+    rows = await db.all("SELECT id,username,first_name,current_link_id FROM users WHERE current_link_id IS NOT NULL ORDER BY joined_at DESC LIMIT 100")
+    buttons = []
+    for user in rows:
+        link = await db.one("SELECT id,url FROM links WHERE id=? AND assigned_user=?", (user["current_link_id"], user["id"]))
+        if link:
+            label = f"{user['first_name']} (@{user['username'] or user['id']}) · ссылка #{link['id']}"
+            buttons.append([(label, f"admuser:{user['id']}")])
+    buttons.append([("Назад ↩️", "admin_home")])
+    await edit_panel(c, "Активные ссылки участников. Нажмите на пользователя, чтобы увидеть точный URL:",
+                     reply_markup=kb(buttons))
+    await c.answer()
+
+
 @dp.callback_query(F.data.startswith("adm_"))
 async def admin_router(c:CallbackQuery,state:FSMContext):
     if not await require_admin(c): return await c.answer("Нет доступа",show_alert=True)
     action=c.data
     if action=="adm_users":
         users=await db.all("SELECT * FROM users ORDER BY joined_at DESC LIMIT 100")
-        await edit_panel(c, "Участники:",reply_markup=kb([[(("@"+u["username"]) if u["username"] else str(u["first_name"]),f"admuser:{u['id']}")] for u in users]+[[("Назад ↩️","home")]]))
+        await edit_panel(c, "Участники:",reply_markup=kb([[(("@"+u["username"]) if u["username"] else str(u["first_name"]),f"admuser:{u['id']}")] for u in users]+[[("Назад ↩️","admin_home")]]))
     elif action=="adm_offers":
         await edit_panel(c, "Выбери действие:",reply_markup=kb([[("Добавить ссылки🔗","adm_addlinks")],[("Прикрепить статистику📊","adm_stats")],[("Назад ↩️","home")]]))
     elif action=="adm_payouts":
@@ -668,7 +732,7 @@ async def admin_router(c:CallbackQuery,state:FSMContext):
                            WHERE p.status='pending'
                            ORDER BY CASE u.role WHEN 'Наставник' THEN 0 WHEN 'Опытный' THEN 1
                            WHEN 'Трафер' THEN 2 ELSE 3 END, p.created_at ASC""")
-        await edit_panel(c, "Заявки на выплату:",reply_markup=kb([[(f"{r['leads']} пдп — ${r['amount']:.2f}",f"payoutreq:{r['id']}")] for r in reqs]+[[("Назад ↩️","home")]]))
+        await edit_panel(c, "Заявки на выплату:",reply_markup=kb([[(f"{r['leads']} пдп — ${r['amount']:.2f}",f"payoutreq:{r['id']}")] for r in reqs]+[[("Назад ↩️","admin_home")]]))
     elif action=="adm_add":
         await state.set_state(Flow.add_admin); await edit_panel(c, "Введите id пользователя для добавления в администрацию:")
     elif action=="adm_news":
@@ -680,7 +744,7 @@ async def admin_router(c:CallbackQuery,state:FSMContext):
         await edit_panel(c, 
             f"Тестовый склад\n❄️ Обычные свободны: {ordinary['n']}\n🌟 Премиум свободны: {premium['n']}\nНазначено участникам: {assigned['n']}\n\n"
             "Добавляются только тестовые слоты, без телефонных номеров и данных авторизации.",
-            reply_markup=kb([[('Завезти обычный акк', 'stock_add:ordinary')], [('Завезти премиум акк', 'stock_add:premium')], [('Назад ↩️', 'home')]])
+            reply_markup=kb([[('Завезти обычный акк', 'stock_add:ordinary')], [('Завезти премиум акк', 'stock_add:premium')], [('Назад ↩️', 'admin_home')]])
         )
     elif action=="adm_addlinks":
         await state.set_state(Flow.offer_title); await edit_panel(c, "Для добавления офера укажи его название:")

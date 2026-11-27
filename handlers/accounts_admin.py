@@ -293,6 +293,7 @@ async def card(acc_id):
         [("🔑 2FA", f"acc_2fa:{acc_id}"), ("🔓 Показ 2FA", f"acc_share:{acc_id}")],
         [("🔁 Класс", f"acc_cls:{acc_id}"), ("🩺 Проверить", f"acc_chk:{acc_id}")],
         [("📜 События", f"acc_ev:{acc_id}"), ("🆓 Освободить", f"acc_free:{acc_id}")],
+        [("📤 Убрать из выдачи" if acc["available_for_issue"] else "📥 Вернуть в выдачу", f"acc_issue:{acc_id}")],
         [("⛔ Отключить" if acc["status"] != "disabled" else "✅ Включить", f"acc_dis:{acc_id}")],
         [("🗑 Удалить", f"acc_del:{acc_id}")],
         [("Назад ↩️", "acc_menu")],
@@ -479,6 +480,20 @@ async def force_free(c: CallbackQuery):
     text, markup = await card(acc_id)
     await app.edit_panel(c, text, reply_markup=markup)
     await c.answer("Освобождён")
+
+
+@router.callback_query(F.data.startswith("acc_issue:"))
+async def issue_toggle(c: CallbackQuery):
+    if not await guard(c): return
+    acc_id=int(c.data.split(":")[1])
+    row=await app.db.one("SELECT available_for_issue FROM accounts WHERE id=?",(acc_id,))
+    if not row: return await c.answer("Аккаунт не найден",show_alert=True)
+    new_value=0 if row["available_for_issue"] else 1
+    await app.db.run("UPDATE accounts SET available_for_issue=? WHERE id=?",(new_value,acc_id))
+    await app.db.audit(c.from_user.id,"account_issue_visibility",acc_id,str(new_value))
+    text,markup=await card(acc_id)
+    await app.edit_panel(c,text,reply_markup=markup)
+    await c.answer("Аккаунт убран из выдачи" if not new_value else "Аккаунт возвращён в выдачу")
 
 
 @router.callback_query(F.data.startswith("acc_dis:"))

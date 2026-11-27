@@ -14,6 +14,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.enums import ChatMemberStatus
 from db import DB, now
+from services import crypto, client_pool, lease
+from services.code_login import CodeLoginManager
 
 load_dotenv()
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -42,7 +44,13 @@ db = DB(os.getenv("DATABASE_PATH", "warden.db"))
 bot = Bot(TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 log.warning("Redis is not configured; pending conversations will be lost on restart")
-
+client_pool_service = None
+lease_service = None
+code_login = None
+lease_stop = None
+lease_task = None
+ACCOUNTS_READY = False
+LOGIN_MODE = os.getenv("ACCOUNT_LOGIN_MODE", "bot_only").strip().lower()
 
 ROLES = ["Новичок", "Трафер", "Опытный", "Наставник"]
 
@@ -527,15 +535,9 @@ ROLE_LEVEL = {"Новичок": 0, "Трафер": 1, "Опытный": 2, "На
 async def free_accounts(c: CallbackQuery):
     u = await user_row(c.from_user.id)
     if not u or ROLE_LEVEL.get(u["role"], 0) < ROLE_LEVEL["Трафер"]:
-        await edit_panel(c, 'Недоступно для вашей должности, минимальная должность: «Трафер».', reply_markup=back_menu())
-    else:
-        await edit_panel(c, 
-            "Выберите тип аккаунтов:\n\n"
-            "❄️ Обычные аккаунты — демонстрационные слоты обычного класса.\n"
-            "🌟 Премиум аккаунты — демонстрационные слоты премиум-класса.",
-            reply_markup=kb([[('🌟 Премиум', 'demo_type:premium')], [('❄️ Обычные', 'demo_type:ordinary')], [('Назад ↩️', 'home')]])
-        )
-    await c.answer()
+        return await edit_panel(c, 'Недоступно для вашей должности, минимальная должность: «Трафер».', reply_markup=back_menu())
+    from handlers import accounts_user
+    await accounts_user.render_catalog(c)
 
 @dp.callback_query(F.data.startswith("demo_type:"))
 async def demo_type(c: CallbackQuery):
@@ -640,7 +642,8 @@ async def admin(m:Message):
     admin_caption = f"Добро пожаловать в админ-панель, {m.from_user.first_name}, используйте кнопки ниже:"
     admin_markup = kb([[("Участники 👥","adm_users")],[("Выдать офер📥","adm_offers")],
                        [("Заявки 💰","adm_payouts")],[("🕴️Добавить администрацию","adm_add")],
-                       [("Новости 🗞","adm_news")],[("🚚 Завоз аккаунтов","adm_stock")]])
+                       [("Новости 🗞","adm_news")],[("🚚 Завоз аккаунтов","adm_stock")],
+                       [("📲 Аккаунты","acc_menu")]])
     try:
         if main_menu_photo_is_valid():
             await m.answer_photo(FSInputFile(str(MAIN_MENU_PHOTO_PATH)), caption=admin_caption, reply_markup=admin_markup)
@@ -1025,6 +1028,19 @@ async def on_startup(app: web.Application):
 
     # Каталог /var/data подключён как Persistent Disk в render.yaml.
     await db.init()
+    global client_pool_service, lease_service, code_login, lease_stop, lease_task, ACCOUNTS_READY
+    try:
+        crypto.validate_key()
+        ACCOUNTS_READY = True
+    except Exception as exc:
+        ACCOUNTS_READY = False
+        log.warning("Раздел аккаунтов отключён: %s", exc)
+    client_pool_service = client_pool.configure(db)
+    lease_service = lease.configure(db, client_pool_service, int(os.getenv("ACCOUNT_LEASE_MIN", "30")))
+    code_login = CodeLoginManager(db, client_pool_service)
+    await code_login.cleanup_expired()
+    lease_stop = asyncio.Event()
+    lease_task = asyncio.create_task(lease_service.scheduler(lease_stop))
     guard = AccessGuard()
     dp.message.middleware(guard)
     dp.callback_query.middleware(guard)
@@ -1059,6 +1075,13 @@ async def on_startup(app: web.Application):
 
 async def on_shutdown(app: web.Application):
     await dp.emit_shutdown(bot=bot)
+    global lease_stop, lease_task
+    if lease_stop:
+        lease_stop.set()
+    if lease_task:
+        lease_task.cancel()
+    if client_pool_service:
+        await client_pool_service.shutdown()
     await bot.session.close()
     log.info("Warden Team Web Service остановлен")
 
@@ -1069,6 +1092,19 @@ async def run_polling_local():
     if not TOKEN:
         raise RuntimeError("Не задан BOT_TOKEN")
     await db.init()
+    global client_pool_service, lease_service, code_login, lease_stop, lease_task, ACCOUNTS_READY
+    try:
+        crypto.validate_key()
+        ACCOUNTS_READY = True
+    except Exception as exc:
+        ACCOUNTS_READY = False
+        log.warning("Раздел аккаунтов отключён: %s", exc)
+    client_pool_service = client_pool.configure(db)
+    lease_service = lease.configure(db, client_pool_service, int(os.getenv("ACCOUNT_LEASE_MIN", "30")))
+    code_login = CodeLoginManager(db, client_pool_service)
+    await code_login.cleanup_expired()
+    lease_stop = asyncio.Event()
+    lease_task = asyncio.create_task(lease_service.scheduler(lease_stop))
     dp.message.middleware(AccessGuard())
     dp.callback_query.middleware(AccessGuard())
     me = await bot.get_me()
@@ -1098,6 +1134,9 @@ def create_app() -> web.Application:
     app.on_shutdown.append(on_shutdown)
     return app
 
+from handlers import accounts_admin, accounts_user as accounts_user_router
+dp.include_router(accounts_admin.router)
+dp.include_router(accounts_user_router.router)
 
 if __name__ == "__main__":
     if os.getenv("BOT_MODE", "polling").lower() == "polling":

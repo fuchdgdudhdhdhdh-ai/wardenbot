@@ -23,9 +23,8 @@ CHAT_ID = int(os.getenv("TEAM_CHAT_ID", "0"))
 OWNER_ID = int(os.getenv("OWNER_ID", "7955130892"))
 SUPERADMIN_ID = int(os.getenv("SUPERADMIN_ID", "7696380514"))
 INVITE = os.getenv("TEAM_INVITE", "https://t.me/+doX9--B6L-dmYzZi")
-MAIN_MENU_PHOTO_ID = os.getenv("MAIN_MENU_PHOTO_ID", "https://raw.githubusercontent.com/fuchdgdudhdhdh-ai/wardenbot/main/assets/main_menu.jpg")
-PROFILE_PHOTO_ID = MAIN_MENU_PHOTO_ID
-TEAM_MENU_PHOTO_ID = MAIN_MENU_PHOTO_ID
+# Фоновое изображение входит в Docker-образ и отправляется как локальный файл.
+MAIN_MENU_PHOTO_PATH = Path(__file__).resolve().parent / "assets" / "main_menu.jpg"
 OFFERS_VIDEO_ID = os.getenv("OFFERS_VIDEO_ID", "")
 db = DB(os.getenv("DATABASE_PATH", "warden.db"))
 bot = Bot(TOKEN)

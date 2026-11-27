@@ -261,6 +261,9 @@ async def unmentor(c: CallbackQuery):
 async def withdraw_start(c: CallbackQuery, state: FSMContext):
     u = await user_row(c.from_user.id)
     if not u: return await c.answer("Сначала нажмите /start", show_alert=True)
+    if Decimal(str(u.get("balance", 0))) < Decimal("0.1"):
+        await edit_panel(c, "На балансе пока нет средств для вывода.", reply_markup=back_menu())
+        return await c.answer()
     await state.set_state(Flow.withdraw_amount)
     await edit_panel(c, f"Ваш баланс: ${u.get('balance', 0):.1f}. Введите сумму вывода (не больше баланса):",
                      reply_markup=kb([[("Отмена ↩️","profile")]]))

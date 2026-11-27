@@ -7,6 +7,7 @@ from telethon.sessions import StringSession
 from telethon.errors import AuthKeyUnregisteredError, ApiIdInvalidError, SessionPasswordNeededError
 from pyrogram import Client as PyrogramClient
 from services.crypto import encrypt
+from db import now
 
 class SessionImportError(RuntimeError): pass
 
@@ -23,7 +24,8 @@ class SessionImporter:
             await self.pool.disconnect(old["id"])
         username = getattr(me, "username", None)
         created_at = datetime.now(timezone.utc).isoformat()
-        await self.db.run("""INSERT INTO accounts(label,api_id,api_hash,session_enc,phone,tg_user_id,tg_username,
+        await self.db.run("INSERT INTO account_events(account_id,user_id,action,detail,created_at) VALUES(?,?,?,?,?)",
+                          (row["id"], self.added_by, action, f"Импортирован {client_type}; tg_user_id={me.id}", now()))
             status,added_by,client_type,created_at) VALUES(?,?,?,?,?,?,?,'free',?,?,?)
             ON CONFLICT(tg_user_id) WHERE tg_user_id IS NOT NULL DO UPDATE SET
             label=excluded.label,api_id=excluded.api_id,api_hash=excluded.api_hash,session_enc=excluded.session_enc,

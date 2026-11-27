@@ -729,7 +729,7 @@ async def admin_router(c:CallbackQuery,state:FSMContext):
         users=await db.all("SELECT * FROM users ORDER BY joined_at DESC LIMIT 100")
         await edit_panel(c, "Участники:",reply_markup=kb([[(("@"+u["username"]) if u["username"] else str(u["first_name"]),f"admuser:{u['id']}")] for u in users]+[[("Назад ↩️","admin_home")]]))
     elif action=="adm_offers":
-        await edit_panel(c, "Выбери действие:",reply_markup=kb([[("Добавить ссылки🔗","adm_addlinks")],[("Прикрепить статистику📊","adm_stats")],[("Назад ↩️","home")]]))
+        await edit_panel(c, "Выбери действие:",reply_markup=kb([[("Добавить ссылки🔗","adm_addlinks")],[("Прикрепить статистику📊","adm_stats")],[("Назад ↩️","admin_home")]]))
     elif action=="adm_payouts":
         reqs=await db.all("""SELECT p.* FROM payout_requests p JOIN users u ON u.id=p.user_id
                            WHERE p.status='pending'

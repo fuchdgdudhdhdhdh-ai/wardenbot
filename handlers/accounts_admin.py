@@ -40,7 +40,8 @@ def keypad(buf):
     for group in (("1", "2", "3"), ("4", "5", "6"), ("7", "8", "9")):
         rows.append([(d, f"acc_code:d:{d}") for d in group])
     rows.append([("⌫", "acc_code:del"), ("0", "acc_code:d:0"), ("✅", "acc_code:ok")])
-    rows.append([("🔄 Код заново", "acc_code:resend"), ("❌ Отмена", "acc_code:cancel")])
+    rows.append([("🔄 Код заново", "acc_code:resend"), ("📩 По SMS", "acc_code:sms")])
+    rows.append([("❌ Отмена", "acc_code:cancel")])
     return app.kb(rows)
 
 
@@ -184,7 +185,7 @@ async def code_button(c: CallbackQuery, state: FSMContext):
         return await c.answer()
     if action == "resend":
         try:
-            note, code_len = await app.code_login.resend(login_id, c.from_user.id)
+            note, code_len = await app.code_login.resend(login_id, c.from_user.id, force_sms=(action == "sms"))
         except FloodWaitError as exc:
             return await c.answer(f"Подождите {exc.seconds} сек.", show_alert=True)
         except (CodeLoginError, LoginNotFound, NotYourLogin) as exc:
@@ -193,7 +194,7 @@ async def code_button(c: CallbackQuery, state: FSMContext):
             log.exception("Не удалось повторно запросить код входа")
             return await c.answer(f"Ошибка повторной отправки ({type(exc).__name__})", show_alert=True)
         await state.update_data(buf="", code_len=code_len)
-        await redraw(c, state, text=f"Код отправлен заново. {note}.")
+        await redraw(c, state, text=f"{'Запрошен код по SMS' if action == 'sms' else 'Код отправлен заново'}. {note}.")
         return await c.answer("Отправлено")
     data = await state.get_data()
     buf = data.get("buf", "")

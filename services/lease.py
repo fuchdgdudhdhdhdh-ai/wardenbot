@@ -49,11 +49,11 @@ class LeaseService:
 
         async def op(conn):
             cur = await conn.execute(
-                "SELECT account_class,status,leased_by,lease_until FROM accounts WHERE id=?",
+                "SELECT account_class,status,leased_by,lease_until,available_for_issue FROM accounts WHERE id=?",
                 (acc_id,),
             )
             account = await cur.fetchone()
-            if not account or account["account_class"] != account_class or account["status"] in ("disabled", "dead"):
+            if not account or account["account_class"] != account_class or account["status"] in ("disabled", "dead") or not account["available_for_issue"]:
                 raise AccountUnavailable("Этот аккаунт недоступен. Обновите список и попробуйте другой.")
             cur = await conn.execute(
                 """SELECT id FROM accounts WHERE leased_by=? AND account_class=? AND status='leased'
@@ -64,7 +64,7 @@ class LeaseService:
                 raise AccountLimit("У вас уже есть активная аренда этого типа аккаунтов.")
             cur = await conn.execute(
                 """UPDATE accounts SET status='leased',leased_by=?,lease_token=?,leased_at=?,lease_until=?
-                   WHERE id=? AND account_class=? AND status IN ('free','leased')
+                   WHERE id=? AND account_class=? AND available_for_issue=1 AND status IN ('free','leased')
                    AND (status='free' OR leased_by=? OR lease_until IS NULL OR lease_until<=?)""",
                 (user_id, token, _stamp(now), _stamp(until), acc_id, account_class, user_id, _stamp(now)),
             )

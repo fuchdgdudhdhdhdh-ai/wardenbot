@@ -603,17 +603,17 @@ async def render_team_stats(c: CallbackQuery, offset: int = 0):
     offset = max(0, offset)
     page = links[offset:offset + page_size]
     member_names = {x["id"]: (x["first_name"] or x["username"] or str(x["id"])) for x in members}
-    body = (f"Команда: {t['name']} ({t['tag']})\\nУчастников: {len(members)}\\nСсылок: {len(links)}\\n"
-            f"Всего лидов по ссылкам команды: {total_leads}\\nОплачено участникам: ${paid['n']:.1f}\\n"
-            f"Возраст команды: {age} дней\\nРейтинг: {await team_rating(t['id'])}%")
+    body = (f"Команда: {t['name']} ({t['tag']})\nУчастников: {len(members)}\nСсылок: {len(links)}\n"
+            f"Всего лидов по ссылкам команды: {total_leads}\nОплачено участникам: ${paid['n']:.1f}\n"
+            f"Возраст команды: {age} дней\nРейтинг: {await team_rating(t['id'])}%")
     if page:
-        body += f"\\n\\nСсылки {offset + 1}–{offset + len(page)} из {len(links)}:"
+        body += f"\n\nСсылки {offset + 1}–{offset + len(page)} из {len(links)}:"
         for link in page:
             owner = member_names.get(link["assigned_user"], str(link["assigned_user"]))
             url = (link["url"] or "")[:100]
-            body += f"\\n\\n#{link['id']} · {owner} · {link['title'] or 'оффер'} · {link['leads']} лидов\\n{url}"
+            body += f"\n\n#{link['id']} · {owner} · {link['title'] or 'оффер'} · {link['leads']} лидов\n{url}"
     else:
-        body += "\\n\\nУ команды пока нет активных или выданных ссылок."
+        body += "\n\nУ команды пока нет активных или выданных ссылок."
     rows = []
     nav = []
     if offset > 0: nav.append(("⬅️ Назад", f"team_stats:{max(0, offset - page_size)}"))

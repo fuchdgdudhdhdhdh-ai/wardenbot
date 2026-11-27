@@ -581,7 +581,8 @@ async def team_stats(c:CallbackQuery):
         label=(owner["first_name"] if owner else str(link["assigned_user"]))
         lines.append(f"#{link['id']} · {label} · {link['title'] or 'оффер'} · {stats['n']} лидов")
     profit=await db.one("SELECT COALESCE(SUM(amount),0) n FROM payout_requests p JOIN users u ON u.id=p.user_id WHERE u.team_id=? AND p.status='paid'",(t["id"],))
-    created=datetime.fromisoformat(t["created_at"]); created=created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created\n    age=max(0,(datetime.now(timezone.utc)-created).days)
+    created=datetime.fromisoformat(t["created_at"]); created=created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created
+    age=max(0,(datetime.now(timezone.utc)-created).days)
     body=(f"Команда: {t['name']} ({t['tag']})\nУчастников: {len(members)}\nСсылок: {len(links)}\n"
           f"Всего лидов по ссылкам команды: {total_leads}\nОплачено участникам: ${profit['n']:.1f}\n"
           f"Возраст команды: {age} дней\nРейтинг: {await team_rating(t['id'])}%")

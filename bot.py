@@ -652,23 +652,26 @@ async def event_create(c:CallbackQuery,state:FSMContext):
     t=await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
     if not (await require_admin(c) or (t and t["owner_id"]==c.from_user.id)):
         return await c.answer("Создать мероприятие может только владелец команды или администратор",show_alert=True)
-    await state.set_state(Flow.event_title); await edit_panel(c, "Введи название мероприятия (до 15 символов):"); await c.answer()
+    await state.set_state(Flow.event_title); await edit_panel(c, "Введи название мероприятия (до 60 символов):"); await c.answer()
 
 @dp.message(Flow.event_title)
 async def event_title(m:Message,state:FSMContext):
-    if len(m.text)>15: return await m.answer("Максимум 15 символов.")
-    await state.update_data(event_title=m.text); await state.set_state(Flow.event_body)
+    title=(m.text or "").strip()
+    if not 1 <= len(title) <= 60: return await m.answer("Название должно содержать от 1 до 60 символов.")
+    await state.update_data(event_title=title); await state.set_state(Flow.event_body)
     await m.answer("Введи текст, условия мероприятия:")
 
 @dp.message(Flow.event_body)
 async def event_body(m:Message,state:FSMContext):
     d=await state.get_data(); u=await user_row(m.from_user.id)
     t=await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
+    body=(m.text or "").strip()
+    if not body: return await m.answer("Отправьте текст мероприятия сообщением.")
     if t and t["owner_id"]==m.from_user.id:
-        await db.run("INSERT INTO events(team_id,title,body,created_at) VALUES(?,?,?,?)",(t["id"],d["event_title"],m.text,now()))
+        await db.run("INSERT INTO events(team_id,title,body,created_at) VALUES(?,?,?,?)",(t["id"],d["event_title"],body,now()))
         result="Мероприятие опубликовано для участников команды."
     elif await db.is_admin(m.from_user.id,OWNER_ID):
-        await db.run("INSERT INTO news(title,body,created_at) VALUES(?,?,?)",(d["event_title"],m.text,now()))
+        await db.run("INSERT INTO news(title,body,created_at) VALUES(?,?,?)",(d["event_title"],body,now()))
         result="Новость опубликована для всех пользователей."
     else:
         await state.clear()

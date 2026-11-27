@@ -787,8 +787,10 @@ async def admin_user(c:CallbackQuery):
     uid=int(c.data.split(":")[1]); u=await user_row(uid)
     if not u: return await c.answer("Пользователь не найден",show_alert=True)
     count=await db.one("SELECT COUNT(*) n FROM links WHERE assigned_user=?",(uid,))
+    current_link = await db.one("SELECT id,url FROM links WHERE id=? AND assigned_user=?", (u["current_link_id"], uid)) if u["current_link_id"] else None
     paid=await db.one("SELECT COALESCE(SUM(amount),0) n FROM payout_requests WHERE user_id=? AND status='paid'",(uid,))
-    await edit_panel(c, f"Участник {u['first_name']} (@{u['username'] or 'нет'})\nID: {uid}\nРегистрация: {u['joined_at']}\nВзято ссылок: {count['n']}\nЗаработал: ${paid['n']:.2f}\nДолжность: {u['role']}",
+    link_info = f"\nТекущая ссылка: #{current_link['id']} — {current_link['url']}" if current_link else "\nТекущая ссылка: нет"
+    await edit_panel(c, f"Участник {u['first_name']} (@{u['username'] or 'нет'})\nID: {uid}\nРегистрация: {u['joined_at']}\nВзято ссылок: {count['n']}{link_info}\nЗаработал: ${paid['n']:.2f}\nДолжность: {u['role']}",
       reply_markup=kb([[("Бан ⛔",f"ban:{uid}")],[("Ограничить доступ ⚠️",f"restrict:{uid}")],
                        [("Забрать ссылку🫴",f"revoke:{uid}")],[("Управление должностью🚀",f"role:{uid}")],
                        [("Назад↩️","adm_users")]]))

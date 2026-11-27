@@ -368,7 +368,7 @@ async def notify_admins(event: str, user_id: int, details: str = ""):
         message += f"\n{details}"
     for admin_id in await admin_ids():
         try:
-            await bot.send_message(admin_id, message)
+            await bot.send_message(admin_id, message, disable_web_page_preview=True)
         except Exception as exc:
             log.warning("Не удалось отправить лог администратору %s: %s", admin_id, exc)
 
@@ -1033,7 +1033,8 @@ async def withdrawal_detail(c: CallbackQuery):
     u=await user_row(r["user_id"]) if r else None
     link=await db.one("SELECT id,url FROM links WHERE id=?",(u["current_link_id"],)) if u and u["current_link_id"] else None
     if not r or not u: return await c.answer("Заявка не найдена",show_alert=True)
-    text_body=f"Заявка #{rid}\nУчастник: {u['first_name']} (@{u['username'] or 'нет'}) · ID {u['id']}\nСумма: ${r['amount']:.1f}\nСсылка: {(f'#{link["id"]} — {link["url"]}' if link else 'нет')}"
+    link_label = f"#{link['id']} — {link['url']}" if link else "нет"
+    text_body=f"Заявка #{rid}\nУчастник: {u['first_name']} (@{u['username'] or 'нет'}) · ID {u['id']}\nСумма: ${r['amount']:.1f}\nСсылка: {link_label}"
     await edit_panel(c,text_body,reply_markup=kb([[("Отклонить ❌",f"wd_reject:{rid}"),("Выплачено ✅",f"wd_paid:{rid}")],[("Назад ↩️","adm_withdrawals")]]))
     await c.answer()
 

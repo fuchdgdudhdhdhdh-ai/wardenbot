@@ -7,7 +7,7 @@ from telethon.errors import (
     SessionPasswordNeededError, PhoneCodeInvalidError, PhoneCodeExpiredError,
     FloodWaitError, ApiIdInvalidError, PhoneNumberInvalidError, PasswordHashInvalidError,
 )
-from telethon.tl.types import SentCodeTypeApp, SentCodeTypeSms, SentCodeTypeCall, SentCodeTypeFlashCall
+from telethon.tl.types.auth import SentCodeTypeApp, SentCodeTypeSms, SentCodeTypeCall, SentCodeTypeFlashCall
 from services.crypto import encrypt, decrypt
 from services.session_import import SessionImporter, SessionImportError
 

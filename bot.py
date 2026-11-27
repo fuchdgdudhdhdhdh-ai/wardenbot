@@ -895,6 +895,19 @@ async def offer_channel(m:Message,state:FSMContext):
 @dp.message(Flow.offer_links)
 async def offer_link_add(m:Message,state:FSMContext):
     if not await db.is_admin(m.from_user.id,OWNER_ID): return
+    # This state handler is registered before the generic /continue handler,
+    # so handle the finish command here instead of trying to parse it as a URL.
+    command = (m.text or "").strip().split(maxsplit=1)[0].split("@", 1)[0].lower()
+    if command == "/continue":
+        try:
+            await m.delete()
+        except Exception:
+            pass
+        d = await state.get_data()
+        if not d.get("links"):
+            return await m.answer("Добавьте хотя бы одну ссылку.")
+        await state.set_state(Flow.offer_price)
+        return await m.answer("Укажите прайс за 1 лида (например 0.8):")
     match=re.search(r"https?://\S+",m.text or "")
     if not match: return await m.answer("Не нашёл ссылку. Отправьте URL, начинающийся с http:// или https://.")
     d=await state.get_data(); links=d.get("links",[]); links.append(match.group(0).rstrip(".,)"))

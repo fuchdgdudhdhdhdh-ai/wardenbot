@@ -220,10 +220,7 @@ async def profile(c: CallbackQuery):
         if available >= max(2, offer["min_leads"]) and datetime.now(timezone.utc) >= assigned + timedelta(days=wait_days):
             rows.insert(0,[("ПОДАТЬ НА ВЫПЛАТУ✅","payout")])
     if mentor: rows.insert(1,[("Отвязаться от наставника","unmentor")])
-    if PROFILE_PHOTO_ID:
-        await edit_panel(c, text, reply_markup=kb(rows))
-    else:
-        await edit_panel(c, text, reply_markup=kb(rows))
+    await edit_panel(c, text, reply_markup=kb(rows))
     await c.answer()
 
 @dp.callback_query(F.data == "unmentor")
@@ -976,7 +973,24 @@ async def news_body(m:Message,state:FSMContext):
 
 @dp.message(Command("cancel"))
 async def cancel(m:Message,state:FSMContext):
-    await state.clear(); await m.answer("Действие отменено.",reply_markup=main_kb())
+    await state.clear()
+    user = await user_row(m.from_user.id)
+    if not user:
+        user = await ensure_user(m.from_user)
+    if user["banned"]:
+        try:
+            await m.delete()
+        except Exception:
+            pass
+        return
+    try:
+        await m.delete()
+    except Exception:
+        pass
+    if not await member_ok(m.from_user.id):
+        await bot.send_message(m.chat.id, "Чтобы открыть панель, вступите в команду: " + INVITE)
+        return
+    await send_home(m, user)
 
 async def health(request: web.Request):
     """Проверка доступности веб-сервиса Render."""

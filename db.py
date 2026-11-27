@@ -156,7 +156,7 @@ class PgConnection:
         query = re.sub(r"\?", repl, query)
         is_insert = bool(re.match(r"INSERT\s+INTO", query, re.I))
         if ignored and "ON CONFLICT" not in query.upper(): query += " ON CONFLICT DO NOTHING"
-        if is_insert and not re.search(r"\bRETURNING\b", query, re.I) and not re.match(r"INSERT INTO (settings|admins|schema_migrations)\\b", query, re.I): query += " RETURNING id"
+        if is_insert and not re.search(r"\bRETURNING\b", query, re.I) and not re.match(r"INSERT INTO (settings|admins|schema_migrations)\b", query, re.I): query += " RETURNING id"
         if re.match(r"^(SELECT|WITH)", query, re.I) or " RETURNING " in query.upper():
             rows = await self.conn.fetch(query, *args)
             last = rows[0]["id"] if is_insert and rows and "id" in rows[0] else None
@@ -224,7 +224,7 @@ class DB:
                 for table in tables:
                     try: await conn.execute(f"SELECT setval(pg_get_serial_sequence('public.{table}','id'), COALESCE((SELECT MAX(id) FROM {table}),1), true)")
                     except Exception: pass
-        log.info("PostgreSQL schema is ready")
+        print("PostgreSQL schema is ready")
 
     async def run(self, sql, args=()):
         if self.database_url:

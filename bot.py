@@ -435,13 +435,14 @@ async def read_news(c: CallbackQuery):
 async def team_menu(c: CallbackQuery):
     u = await user_row(c.from_user.id)
     t = await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
-    if t and t["owner_id"] == u["id"]:
-        caption = f"Ваша команда: {t['name']}, выбирайте кнопки что бы настроить или посмотреть функции"
-        markup = kb([[ ("👥Участники","team_members"), ("🔥Мероприятия","events")],
-                     [("📈Статистика","team_stats")],[("Расформировать ✖️","team_delete")],[("Назад ↩️","home")]])
-        await edit_panel(c, caption, reply_markup=markup)
-    elif t:
-        await edit_panel(c, f"Вы состоите в команде «{t['name']}» ({t['tag']}).\nДля управления командой доступны функции владельца.", reply_markup=back_menu())
+    if t:
+        owner = t["owner_id"] == u["id"]
+        caption = f"Команда «{t['name']}» ({t['tag']})."
+        rows = [[("🗞 Мероприятия", "events")], [("📊 Статистика", "team_stats")]]
+        if owner:
+            rows.extend([[("👥 Участники", "team_members")], [("Расформировать ✖️", "team_delete")]])
+        rows.append([("Назад ↩️", "home")])
+        await edit_panel(c, caption, reply_markup=kb(rows))
     else:
         await edit_panel(c, "Привет! Если ты хочешь, чтобы тебе помогали в трафике или хочешь помогать в трафике, нажимай подходящую кнопку 👇",
             reply_markup=kb([[ ("Создать команду ➕","team_create")],[("Вступить в команду 👥","team_join")],[("Назад ↩️","home")]]))

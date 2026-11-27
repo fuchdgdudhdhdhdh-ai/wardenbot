@@ -256,6 +256,51 @@ async def unmentor(c: CallbackQuery):
     await edit_panel(c, "Вы отвязались от наставника. Теперь действует стандартный прайс.")
     await c.answer()
 
+
+@dp.callback_query(F.data == "withdraw")
+async def withdraw_start(c: CallbackQuery, state: FSMContext):
+    u = await user_row(c.from_user.id)
+    if not u: return await c.answer("Сначала нажмите /start", show_alert=True)
+    await state.set_state(Flow.withdraw_amount)
+    await edit_panel(c, f"Ваш баланс: ${u.get('balance', 0):.1f}. Введите сумму вывода (не больше баланса):",
+                     reply_markup=kb([[("Отмена ↩️","profile")]]))
+    await c.answer()
+
+@dp.message(Flow.withdraw_amount)
+async def withdraw_submit(m: Message, state: FSMContext):
+    try:
+        amount = Decimal((m.text or "").replace(",", ".")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+        if amount <= 0: raise ValueError()
+    except Exception:
+        return await m.answer("Введите положительную сумму, например 15.5.")
+    u = await user_row(m.from_user.id)
+    if not u or Decimal(str(u.get("balance", 0))) < amount:
+        return await m.answer("Недостаточно средств на балансе. Введите сумму в пределах баланса.")
+    async def create(conn):
+        cur = await conn.execute("UPDATE users SET balance=balance-? WHERE id=? AND balance>=?", (float(amount), m.from_user.id, float(amount)))
+        cur = await conn.execute("SELECT balance FROM users WHERE id=?", (m.from_user.id,))
+        row = await cur.fetchone()
+        if not row or float(row["balance"]) < -0.00001: return None
+        cur = await conn.execute("INSERT INTO withdrawals(user_id,amount,created_at) VALUES(?,?,?)", (m.from_user.id,float(amount),now()))
+        return cur.lastrowid
+    try:
+        request_id = await db.transaction(create)
+    except Exception:
+        log.exception("Не удалось создать заявку на вывод")
+        return await m.answer("Не удалось создать заявку. Попробуйте позже.")
+    if not request_id:
+        return await m.answer("Баланс изменился. Проверьте сумму и попробуйте снова.")
+    await state.clear()
+    link = await db.one("SELECT id,url FROM links WHERE id=?", (u["current_link_id"],)) if u.get("current_link_id") else None
+    link_info = f"#{link['id']} — {link['url']}" if link else "нет активной ссылки"
+    details = f"Заявка на вывод #{request_id}\nУчастник: {u['first_name']} (@{u['username'] or 'нет'}) · ID {u['id']}\nСумма: ${amount:.1f}\nСсылка: {link_info}"
+    for admin_id in await admin_ids():
+        try:
+            await bot.send_message(admin_id, details, reply_markup=kb([[("Отклонить ❌",f"wd_reject:{request_id}"),("Выплачено ✅",f"wd_paid:{request_id}")]]), disable_web_page_preview=True)
+        except Exception:
+            log.exception("Не удалось отправить заявку на вывод администратору %s", admin_id)
+    await m.answer(f"Заявка на вывод #{request_id} на сумму ${amount:.1f} отправлена администрации.")
+
 @dp.callback_query(F.data == "payout")
 async def payout(c: CallbackQuery, state: FSMContext):
     u = await user_row(c.from_user.id)
@@ -736,6 +781,9 @@ async def admin_router(c:CallbackQuery,state:FSMContext):
                            ORDER BY CASE u.role WHEN 'Наставник' THEN 0 WHEN 'Опытный' THEN 1
                            WHEN 'Трафер' THEN 2 ELSE 3 END, p.created_at ASC""")
         await edit_panel(c, "Заявки на выплату:",reply_markup=kb([[(f"{r['leads']} пдп — ${r['amount']:.2f}",f"payoutreq:{r['id']}")] for r in reqs]+[[("Назад ↩️","admin_home")]]))
+    elif action=="adm_withdrawals":
+        reqs=await db.all("SELECT * FROM withdrawals WHERE status='pending' ORDER BY created_at")
+        await edit_panel(c, "Заявки на вывод:", reply_markup=kb([[(f"#{x['id']} · ID {x['user_id']} · ${x['amount']:.1f}",f"wd_detail:{x['id']}")] for x in reqs]+[[( "Назад ↩️","admin_home")]]))
     elif action=="adm_add":
         await state.set_state(Flow.add_admin); await edit_panel(c, "Введите id пользователя для добавления в администрацию:")
     elif action=="adm_news":
@@ -975,6 +1023,41 @@ async def lead_change(c:CallbackQuery):
     else: await edit_panel(c, "Ссылка ещё не выдана участнику.")
     await c.answer()
 
+
+
+@dp.callback_query(F.data.startswith("wd_detail:"))
+async def withdrawal_detail(c: CallbackQuery):
+    if not await require_admin(c): return await c.answer("Нет доступа", show_alert=True)
+    rid=int(c.data.split(":")[1])
+    r=await db.one("SELECT * FROM withdrawals WHERE id=?",(rid,))
+    u=await user_row(r["user_id"]) if r else None
+    link=await db.one("SELECT id,url FROM links WHERE id=?",(u["current_link_id"],)) if u and u["current_link_id"] else None
+    if not r or not u: return await c.answer("Заявка не найдена",show_alert=True)
+    text_body=f"Заявка #{rid}\nУчастник: {u['first_name']} (@{u['username'] or 'нет'}) · ID {u['id']}\nСумма: ${r['amount']:.1f}\nСсылка: {(f'#{link["id"]} — {link["url"]}' if link else 'нет')}"
+    await edit_panel(c,text_body,reply_markup=kb([[("Отклонить ❌",f"wd_reject:{rid}"),("Выплачено ✅",f"wd_paid:{rid}")],[("Назад ↩️","adm_withdrawals")]]))
+    await c.answer()
+
+@dp.callback_query(F.data.startswith("wd_"))
+async def withdrawal_review(c: CallbackQuery):
+    if not await require_admin(c): return await c.answer("Нет доступа", show_alert=True)
+    action, raw_id = c.data.split(":")
+    request_id = int(raw_id)
+    status = "paid" if action == "wd_paid" else "rejected"
+    row = await db.one("SELECT * FROM withdrawals WHERE id=? AND status='pending'", (request_id,))
+    if not row: return await c.answer("Заявка уже обработана", show_alert=True)
+    await db.run("UPDATE withdrawals SET status=?,reviewed_at=?,admin_id=? WHERE id=? AND status='pending'",
+                 (status, now(), c.from_user.id, request_id))
+    user = await user_row(row["user_id"])
+    if status == "paid":
+        message = f"Заявка на вывод #{request_id} одобрена и отмечена как выплаченная. Сумма: ${row['amount']:.1f}."
+    else:
+        message = f"Заявка на вывод #{request_id} отклонена администрацией. Сумма ${row['amount']:.1f} не возвращается на баланс согласно правилам."
+    try: await bot.send_message(row["user_id"], message)
+    except Exception: log.exception("Не удалось уведомить пользователя о заявке на вывод")
+    await db.audit(c.from_user.id, f"withdrawal_{status}", row["user_id"], f"request={request_id}; amount={row['amount']}")
+    await edit_panel(c, f"Заявка на вывод #{request_id}: { 'выплачена' if status == 'paid' else 'отклонена'}.")
+    await c.answer("Решение сохранено")
+
 @dp.callback_query(F.data.startswith("payoutreq:"))
 async def payout_detail(c:CallbackQuery):
     if not await require_admin(c): return await c.answer("Нет доступа",show_alert=True)
@@ -1076,6 +1159,39 @@ async def news_body(m:Message,state:FSMContext):
     d=await state.get_data()
     await db.run("INSERT INTO news(title,body,created_at) VALUES(?,?,?)",(d["news_title"],m.text,now()))
     await state.clear(); await m.answer("Новость опубликована.")
+
+
+@dp.message(Command("plus"))
+async def balance_plus(m: Message):
+    if not await require_admin(m): return await deny_admin_command(m)
+    parts = (m.text or "").split()
+    if len(parts) != 3 or not parts[1].isdigit():
+        return await m.answer("Формат: /plus ID сумма")
+    try: amount = Decimal(parts[2].replace(",", ".")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    except Exception: return await m.answer("Сумма должна быть числом, например /plus 123456789 10.5")
+    if amount <= 0: return await m.answer("Сумма должна быть больше нуля.")
+    uid = int(parts[1])
+    await db.run("UPDATE users SET balance=balance+? WHERE id=?", (float(amount), uid))
+    u = await user_row(uid)
+    if not u: return await m.answer("Пользователь не найден.")
+    await db.audit(m.from_user.id,"balance_plus",uid,str(amount))
+    await m.answer(f"Баланс пользователя {uid} увеличен на ${amount:.1f}. Новый баланс: ${u['balance']:.1f}.")
+
+@dp.message(Command("minus"))
+async def balance_minus(m: Message):
+    if not await require_admin(m): return await deny_admin_command(m)
+    parts = (m.text or "").split()
+    if len(parts) != 3 or not parts[1].isdigit():
+        return await m.answer("Формат: /minus ID сумма")
+    try: amount = Decimal(parts[2].replace(",", ".")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    except Exception: return await m.answer("Сумма должна быть числом, например /minus 123456789 10.5")
+    if amount <= 0: return await m.answer("Сумма должна быть больше нуля.")
+    uid = int(parts[1])
+    await db.run("UPDATE users SET balance=balance-? WHERE id=? AND balance>=?", (float(amount),uid,float(amount)))
+    u = await user_row(uid)
+    if not u: return await m.answer("Пользователь не найден.")
+    await db.audit(m.from_user.id,"balance_minus",uid,str(amount))
+    await m.answer(f"Баланс пользователя {uid}: ${u['balance']:.1f}.")
 
 @dp.message(Command("cancel"))
 async def cancel(m:Message,state:FSMContext):

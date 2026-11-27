@@ -324,7 +324,7 @@ async def payout(c: CallbackQuery, state: FSMContext):
         return await c.answer(f"Для следующей выплаты нужно минимум {minimum} новых лидов и {wait_days} дней после выдачи ссылки. Сейчас доступно: {available}.", show_alert=True)
     bonus = 0.1 if u["role"] in ("Опытный","Наставник") else 0
     mentor_discount = 0.1 if u["mentor_id"] else 0
-    price = float((Decimal(str(offer["price"])) + Decimal(str(bonus)) - Decimal(str(mentor_discount))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    price = float((Decimal(str(offer["price"])) + Decimal(str(bonus)) - Decimal(str(mentor_discount))).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
     price = max(0.0, price)
     try:
         req_id, payable_leads, amount = await db.create_payout(u["id"], link["id"], leads["n"], price, u["mentor_id"])
@@ -332,7 +332,7 @@ async def payout(c: CallbackQuery, state: FSMContext):
         return await c.answer(str(e), show_alert=True)
     await state.update_data(payout_id=req_id)
     await state.set_state(Flow.payout_invoice)
-    await edit_panel(c, f"Заявка #{req_id}: {payable_leads} лидов × ${price:.2f} = ${amount:.2f}.\n"
+    await edit_panel(c, f"Заявка #{req_id}: {payable_leads} лидов × ${price:.1f} = ${amount:.1f}.\n"
                            "Пожалуйста пришлите свой счет в CryptoBot.\n\n"
                            "Инструкция: Откройте главное меню крипто бота ⮕ Счета ⮕ Создать счёт ⮕ "
                            "Многоразовый ⮕ USDT ⮕ Далее ⮕ Скопируйте ссылку и отправьте её сюда.",
@@ -350,7 +350,7 @@ async def payout_invoice(m: Message, state: FSMContext):
     await state.clear()
     await m.answer("Ваша заявка отправлена на рассмотрение администратором. Пожалуйста дождитесь проверки и не спамьте в личные сообщения иначе вы будете заблокированы.")
     for a in await admin_ids():
-        await bot.send_message(a, f"Новая заявка #{data['payout_id']} от @{m.from_user.username or m.from_user.id}")
+        await bot.send_message(a, f"Новая заявка #{data['payout_id']} от @{m.from_user.username or m.from_user.id}", disable_web_page_preview=True)
 
 async def admin_ids():
     rows = await db.all("SELECT user_id FROM admins")
@@ -588,7 +588,7 @@ async def events(c:CallbackQuery):
     t=await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
     if not t: return await c.answer("Вы не состоите в команде",show_alert=True)
     buttons=[[("Мероприятия и новости","my_events")]]
-    if t["owner_id"]==c.from_user.id:
+    if t["owner_id"]==c.from_user.id or await require_admin(c):
         buttons.append([("Создать мероприятие","event_create")])
     buttons.append([("Назад ↩️","team")])
     await edit_panel(c,"Мероприятия команды и новости администрации:",reply_markup=kb(buttons))
@@ -611,12 +611,18 @@ async def event_title(m:Message,state:FSMContext):
 
 @dp.message(Flow.event_body)
 async def event_body(m:Message,state:FSMContext):
-    d=await state.get_data(); t=await db.one("SELECT * FROM teams WHERE owner_id=?",(m.from_user.id,))
-    if not t:
+    d=await state.get_data(); u=await user_row(m.from_user.id)
+    t=await db.one("SELECT * FROM teams WHERE id=?",(u["team_id"],)) if u and u["team_id"] else None
+    if t and t["owner_id"]==m.from_user.id:
+        await db.run("INSERT INTO events(team_id,title,body,created_at) VALUES(?,?,?,?)",(t["id"],d["event_title"],m.text,now()))
+        result="Мероприятие опубликовано для участников команды."
+    elif await db.is_admin(m.from_user.id,OWNER_ID):
+        await db.run("INSERT INTO news(title,body,created_at) VALUES(?,?,?)",(d["event_title"],m.text,now()))
+        result="Новость опубликована для всех пользователей."
+    else:
         await state.clear()
-        return await m.answer("Команда не найдена. Создать мероприятие может владелец команды.")
-    await db.run("INSERT INTO events(team_id,title,body,created_at) VALUES(?,?,?,?)",(t["id"],d["event_title"],m.text,now()))
-    await state.clear(); await m.answer("Мероприятие создано.",reply_markup=back_menu())
+        return await m.answer("Создать мероприятие может только владелец команды.")
+    await state.clear(); await m.answer(result,reply_markup=back_menu())
 
 @dp.callback_query(F.data=="my_events")
 async def my_events(c:CallbackQuery):
@@ -675,7 +681,8 @@ ROLE_LEVEL = {"Новичок": 0, "Трафер": 1, "Опытный": 2, "На
 async def free_accounts(c: CallbackQuery):
     u = await user_row(c.from_user.id)
     if not u or ROLE_LEVEL.get(u["role"], 0) < ROLE_LEVEL["Трафер"]:
-        return await edit_panel(c, 'Недоступно для вашей должности, минимальная должность: «Трафер».', reply_markup=back_menu())
+        await edit_panel(c, 'Бесплатные аккаунты доступны с должности «Трафер». Повысите должность, чтобы открыть каталог.', reply_markup=back_menu())
+        return await c.answer()
     from handlers import accounts_user
     await accounts_user.render_catalog(c)
 
@@ -843,7 +850,7 @@ async def admin_router(c:CallbackQuery,state:FSMContext):
                            WHERE p.status='pending'
                            ORDER BY CASE u.role WHEN 'Наставник' THEN 0 WHEN 'Опытный' THEN 1
                            WHEN 'Трафер' THEN 2 ELSE 3 END, p.created_at ASC""")
-        await edit_panel(c, "Заявки на выплату:",reply_markup=kb([[(f"{r['leads']} пдп — ${r['amount']:.2f}",f"payoutreq:{r['id']}")] for r in reqs]+[[("Назад ↩️","admin_home")]]))
+        await edit_panel(c, "Заявки на выплату:",reply_markup=kb([[(f"{r['leads']} пдп — ${r['amount']:.1f}",f"payoutreq:{r['id']}")] for r in reqs]+[[("Назад ↩️","admin_home")]]))
     elif action=="adm_withdrawals":
         reqs=await db.all("SELECT * FROM withdrawals WHERE status='pending' ORDER BY created_at")
         await edit_panel(c, "Заявки на вывод:", reply_markup=kb([[(f"#{x['id']} · ID {x['user_id']} · ${x['amount']:.1f}",f"wd_detail:{x['id']}")] for x in reqs]+[[( "Назад ↩️","admin_home")]]))
@@ -1143,7 +1150,7 @@ async def payout_paid(c:CallbackQuery):
     settled = await db.settle_payout(rid, c.from_user.id, "paid")
     if not settled: return await c.answer("Заявка уже обработана",show_alert=True)
     await db.audit(c.from_user.id,"payout_paid",settled["user_id"],f"request={rid}; amount={settled['amount']}")
-    await bot.send_message(settled["user_id"],f"Вам пришла выплата в размере ${settled['amount']:.2f} на CryptoBot. Срезов нет")
+    await bot.send_message(settled["user_id"],f"Вам пришла выплата в размере ${settled['amount']:.1f} на CryptoBot. Срезов нет")
     await edit_panel(c, "Заявка отмечена как оплаченная."); await c.answer()
 
 @dp.callback_query(F.data.startswith("reject:"))
@@ -1179,7 +1186,7 @@ async def payout_cut_count(m:Message,state:FSMContext):
     if not settled: return await m.answer("Заявка уже обработана другим администратором.")
     amount=settled["amount"]
     await db.audit(m.from_user.id,"payout_cut",settled["user_id"],f"request={r['id']}; cuts={cuts}; amount={amount}")
-    await bot.send_message(settled["user_id"],f"Вам пришла выплата в размере: ${amount:.2f} на CryptoBot. Срезы: {cuts} пдп")
+    await bot.send_message(settled["user_id"],f"Вам пришла выплата в размере: ${amount:.1f} на CryptoBot. Срезы: {cuts} пдп")
     await state.clear(); await m.answer("Выплата обработана.")
 
 @dp.message(Flow.add_admin)

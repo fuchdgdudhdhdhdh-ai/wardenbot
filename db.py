@@ -205,7 +205,6 @@ class DB:
         async with pool.acquire() as conn:
             for statement in schema.split(";"):
                 if statement.strip(): await conn.execute(statement)
-            await conn.execute("INSERT INTO settings(key,value) VALUES('channel','') ON CONFLICT(key) DO NOTHING")
             # Import the existing persistent SQLite file once, before the new database gets populated.
             if os.path.exists(self.path) and await conn.fetchval("SELECT COUNT(*) FROM users") == 0:
                 src = sqlite3.connect(self.path)
@@ -224,6 +223,7 @@ class DB:
                 for table in tables:
                     try: await conn.execute(f"SELECT setval(pg_get_serial_sequence('public.{table}','id'), COALESCE((SELECT MAX(id) FROM {table}),1), true)")
                     except Exception: pass
+            await conn.execute("INSERT INTO settings(key,value) VALUES('channel','') ON CONFLICT(key) DO NOTHING")
         print("PostgreSQL schema is ready")
 
     async def run(self, sql, args=()):

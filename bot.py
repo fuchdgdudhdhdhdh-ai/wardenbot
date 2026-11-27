@@ -235,7 +235,7 @@ async def profile(c: CallbackQuery):
     link_text = link["url"] if link else "Нет ссылки"
     number = str(link["id"]) if link else "Нет ссылки"
     text = (f"Профиль {u['first_name']}:\nБаланс: ${u.get('balance', 0):.1f}\nЗалито лидов: {leads['n'] if link else 'Нет ссылки'}\n"
-            f"Ваша ссылка: {number} — {link_text}\nМой наставник: {mentor_name}\nДолжность: {u['role']}\n\nИспользуй кнопки ниже 👇")
+            f"Ваша ссылка: {number} — {link_text}\nМой наставник: {mentor_name}\nБаланс: ${u.get('balance',0):.1f}\nДолжность: {u['role']}\n\nИспользуй кнопки ниже 👇")
     rows = [[("💸 Вывод средств","withdraw")],[("Назад ↩️","home")]]
     if link:
         offer = await db.one("SELECT * FROM offers WHERE id=?", (link["offer_id"],))
@@ -277,10 +277,10 @@ async def withdraw_submit(m: Message, state: FSMContext):
     if not u or Decimal(str(u.get("balance", 0))) < amount:
         return await m.answer("Недостаточно средств на балансе. Введите сумму в пределах баланса.")
     async def create(conn):
-        cur = await conn.execute("UPDATE users SET balance=balance-? WHERE id=? AND balance>=?", (float(amount), m.from_user.id, float(amount)))
         cur = await conn.execute("SELECT balance FROM users WHERE id=?", (m.from_user.id,))
         row = await cur.fetchone()
-        if not row or float(row["balance"]) < -0.00001: return None
+        if not row or Decimal(str(row["balance"])) < amount: return None
+        await conn.execute("UPDATE users SET balance=balance-? WHERE id=? AND balance>=?", (float(amount), m.from_user.id, float(amount)))
         cur = await conn.execute("INSERT INTO withdrawals(user_id,amount,created_at) VALUES(?,?,?)", (m.from_user.id,float(amount),now()))
         return cur.lastrowid
     try:
@@ -377,8 +377,8 @@ async def build_admin_keyboard():
     enabled = await admin_logging_enabled()
     label = "🟢 Логирование: ВКЛ" if enabled else "🔴 Логирование: ВЫКЛ"
     return kb([[("Участники 👥","adm_users")],[("Выдать офер📥","adm_offers")],
-               [("Заявки 💰","adm_payouts")],[("🕴️Добавить администрацию","adm_add")],
-               [("Новости 🗞","adm_news")],[("🚚 Завоз аккаунтов","adm_stock")],
+               [("Заявки 💰","adm_payouts")],[("💸 Заявки на вывод","adm_withdrawals")],[("🕴️Добавить администрацию","adm_add")],
+               [("Новости 🗞","adm_news")],
                [("📲 Аккаунты","acc_menu")],[("🔎 Ссылки пользователей","adm_monitor")],
                [(label,"adm_log_toggle")]])
 
@@ -1192,12 +1192,16 @@ async def news_body(m:Message,state:FSMContext):
 async def balance_plus(m: Message):
     if not await require_admin(m): return await deny_admin_command(m)
     parts = (m.text or "").split()
-    if len(parts) != 3 or not parts[1].isdigit():
-        return await m.answer("Формат: /plus ID сумма")
-    try: amount = Decimal(parts[2].replace(",", ".")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
-    except Exception: return await m.answer("Сумма должна быть числом, например /plus 123456789 10.5")
+    if len(parts) == 2:
+        uid = m.reply_to_message.from_user.id if m.reply_to_message else m.from_user.id
+        raw_amount = parts[1]
+    elif len(parts) == 3 and parts[1].isdigit():
+        uid, raw_amount = int(parts[1]), parts[2]
+    else:
+        return await m.answer("Формат: /plus сумма (ответом на сообщение пользователя) или /plus ID сумма")
+    try: amount = Decimal(raw_amount.replace(",", ".")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    except Exception: return await m.answer("Сумма должна быть числом, например /plus 10.5")
     if amount <= 0: return await m.answer("Сумма должна быть больше нуля.")
-    uid = int(parts[1])
     await db.run("UPDATE users SET balance=balance+? WHERE id=?", (float(amount), uid))
     u = await user_row(uid)
     if not u: return await m.answer("Пользователь не найден.")
@@ -1208,12 +1212,16 @@ async def balance_plus(m: Message):
 async def balance_minus(m: Message):
     if not await require_admin(m): return await deny_admin_command(m)
     parts = (m.text or "").split()
-    if len(parts) != 3 or not parts[1].isdigit():
-        return await m.answer("Формат: /minus ID сумма")
-    try: amount = Decimal(parts[2].replace(",", ".")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
-    except Exception: return await m.answer("Сумма должна быть числом, например /minus 123456789 10.5")
+    if len(parts) == 2:
+        uid = m.reply_to_message.from_user.id if m.reply_to_message else m.from_user.id
+        raw_amount = parts[1]
+    elif len(parts) == 3 and parts[1].isdigit():
+        uid, raw_amount = int(parts[1]), parts[2]
+    else:
+        return await m.answer("Формат: /minus сумма (ответом на сообщение пользователя) или /minus ID сумма")
+    try: amount = Decimal(raw_amount.replace(",", ".")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    except Exception: return await m.answer("Сумма должна быть числом, например /minus 10.5")
     if amount <= 0: return await m.answer("Сумма должна быть больше нуля.")
-    uid = int(parts[1])
     await db.run("UPDATE users SET balance=balance-? WHERE id=? AND balance>=?", (float(amount),uid,float(amount)))
     u = await user_row(uid)
     if not u: return await m.answer("Пользователь не найден.")

@@ -33,7 +33,7 @@ def main_menu_photo_is_valid() -> bool:
             header = photo.read(3)
             photo.seek(-2, 2)
             footer = photo.read(2)
-        return header == b"\\xff\\xd8\\xff" and footer == b"\\xff\\xd9"
+        return header == b"\xff\xd8\xff" and footer == b"\xff\xd9"
     except (OSError, ValueError):
         return False
 

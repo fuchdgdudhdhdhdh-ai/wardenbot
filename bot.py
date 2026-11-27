@@ -1036,7 +1036,7 @@ async def on_startup(app: web.Application):
         ACCOUNTS_READY = False
         log.warning("Раздел аккаунтов отключён: %s", exc)
     client_pool_service = client_pool.configure(db)
-    lease_service = lease.configure(db, client_pool_service, int(os.getenv("ACCOUNT_LEASE_MIN", os.getenv("ACCOUNT_LEASE_TTL_MIN", "30")) ))
+    lease_service = lease.configure(db, client_pool_service, int(os.getenv("ACCOUNT_LEASE_MIN", os.getenv("ACCOUNT_LEASE_TTL_MIN", "30"))))
     code_login = CodeLoginManager(db, client_pool_service)
     await code_login.cleanup_expired()
     lease_stop = asyncio.Event()
@@ -1100,7 +1100,7 @@ async def run_polling_local():
         ACCOUNTS_READY = False
         log.warning("Раздел аккаунтов отключён: %s", exc)
     client_pool_service = client_pool.configure(db)
-    lease_service = lease.configure(db, client_pool_service, int(os.getenv("ACCOUNT_LEASE_MIN", os.getenv("ACCOUNT_LEASE_TTL_MIN", "30")) ))
+    lease_service = lease.configure(db, client_pool_service, int(os.getenv("ACCOUNT_LEASE_MIN", os.getenv("ACCOUNT_LEASE_TTL_MIN", "30"))))
     code_login = CodeLoginManager(db, client_pool_service)
     await code_login.cleanup_expired()
     lease_stop = asyncio.Event()

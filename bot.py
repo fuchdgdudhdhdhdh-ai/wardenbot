@@ -11,10 +11,6 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-try:
-    from aiogram.fsm.storage.redis import RedisStorage
-except ImportError:
-    RedisStorage = None
 from aiogram.enums import ChatMemberStatus
 from db import DB, now
 
@@ -32,22 +28,9 @@ TEAM_MENU_PHOTO_ID = os.getenv("TEAM_MENU_PHOTO_ID", "")
 OFFERS_VIDEO_ID = os.getenv("OFFERS_VIDEO_ID", "")
 db = DB(os.getenv("DATABASE_PATH", "warden.db"))
 bot = Bot(TOKEN)
-redis_url = os.getenv("REDIS_URL", "")
-if redis_url and RedisStorage:
-    dp = Dispatcher(storage=RedisStorage.from_url(redis_url))
-else:
-    dp = Dispatcher(storage=MemoryStorage())
-    log.warning("Redis FSM storage is disabled; pending conversations will be lost on restart")
+dp = Dispatcher(storage=MemoryStorage())
+log.warning("Redis is not configured; pending conversations will be lost on restart")
 
-# Отдельные роутеры реального пула аккаунтов; существующие хендлеры не заменяются.
-from services.client_pool import configure as configure_client_pool
-from services.lease import configure as configure_lease
-from handlers.admin.accounts import setup_admin_accounts
-from handlers.user.accounts import setup_user_accounts
-account_pool = configure_client_pool(db)
-account_leases = configure_lease(db, account_pool, int(os.getenv("ACCOUNT_LEASE_TTL_MIN", "30")))
-dp.include_router(setup_admin_accounts(db, account_pool, OWNER_ID))
-dp.include_router(setup_user_accounts(db, account_pool, OWNER_ID))
 
 ROLES = ["Новичок", "Трафер", "Опытный", "Наставник"]
 
@@ -78,8 +61,7 @@ def main_kb():
     return kb([[("👤Мой профиль","profile"),("📥Оферы","offers")],
                [("🗞Новости","news"),("🔰Команда","team")],
                [("Обучение 💻","learning")],
-               [("📱 Аренда Telegram-аккаунта","user_accounts")],
-               [("Бесплатный аккаунт ☎","free_accounts")]])
+                              [("Бесплатный аккаунт ☎","free_accounts")]])
 
 def back_menu():
     return kb([[("Назад ↩️","home")]])
@@ -143,8 +125,6 @@ async def send_home(target, user):
 
 @dp.message(CommandStart())
 async def start(m: Message, state: FSMContext):
-    from handlers.admin.accounts import cancel_phone_import
-    await cancel_phone_import(m.from_user.id)
     await state.clear()
     args = (m.text or "").split(maxsplit=1)
     mentor = None
@@ -613,7 +593,7 @@ async def admin(m:Message):
     await m.answer(f"Добро пожаловать в админ-панель, {m.from_user.first_name}, используйте кнопки ниже:",
        reply_markup=kb([[("Участники 👥","adm_users")],[("Выдать офер📥","adm_offers")],
                         [("Заявки 💰","adm_payouts")],[("🕴️Добавить администрацию","adm_add")],
-                        [("Новости 🗞","adm_news")],[("📱 Пул Telegram-аккаунтов","accadm:menu")],[("🚚 Завоз аккаунтов","adm_stock")]]))
+                        [("Новости 🗞","adm_news")],[("🚚 Завоз аккаунтов","adm_stock")]]))
 
 @dp.callback_query(F.data.startswith("adm_"))
 async def admin_router(c:CallbackQuery,state:FSMContext):
@@ -953,8 +933,6 @@ async def news_body(m:Message,state:FSMContext):
 
 @dp.message(Command("cancel"))
 async def cancel(m:Message,state:FSMContext):
-    from handlers.admin.accounts import cancel_phone_import
-    await cancel_phone_import(m.from_user.id)
     await state.clear(); await m.answer("Действие отменено.",reply_markup=main_kb())
 
 async def health(request: web.Request):
@@ -968,9 +946,6 @@ async def on_startup(app: web.Application):
 
     # Каталог /var/data подключён как Persistent Disk в render.yaml.
     await db.init()
-    from services.crypto import validate_key
-    validate_key()
-
     guard = AccessGuard()
     dp.message.middleware(guard)
     dp.callback_query.middleware(guard)
@@ -1002,27 +977,13 @@ async def on_startup(app: web.Application):
     )
     await dp.emit_startup(bot=bot)
 
-    stop_sweeper = asyncio.Event()
-    sweeper_task = asyncio.create_task(account_leases.scheduler(stop_sweeper))
-    app["stop_sweeper"] = stop_sweeper
-    app["sweeper_task"] = sweeper_task
     log.info("Webhook запущен для @%s; URL=%s%s", me.username, webhook_base, webhook_path)
 
 
 async def on_shutdown(app: web.Application):
-    stop_sweeper = app.get("stop_sweeper")
-    sweeper_task = app.get("sweeper_task")
-    if stop_sweeper:
-        stop_sweeper.set()
-    if sweeper_task:
-        await sweeper_task
-
-    from handlers.admin.accounts import shutdown_phone_imports
-    await shutdown_phone_imports()
-    await account_pool.shutdown()
     await dp.emit_shutdown(bot=bot)
     await bot.session.close()
-    log.info("Все Telegram-клиенты отключены; приложение завершено")
+    log.info("Warden Team Web Service остановлен")
 
 
 
@@ -1031,22 +992,13 @@ async def run_polling_local():
     if not TOKEN:
         raise RuntimeError("Не задан BOT_TOKEN")
     await db.init()
-    from services.crypto import validate_key
-    validate_key()
     dp.message.middleware(AccessGuard())
     dp.callback_query.middleware(AccessGuard())
     me = await bot.get_me()
     log.info("Локальный polling запущен для @%s (id=%s)", me.username, me.id)
-    stop_sweeper = asyncio.Event()
-    sweeper_task = asyncio.create_task(account_leases.scheduler(stop_sweeper))
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
-        stop_sweeper.set()
-        await sweeper_task
-        from handlers.admin.accounts import shutdown_phone_imports
-        await shutdown_phone_imports()
-        await account_pool.shutdown()
         await bot.session.close()
 
 

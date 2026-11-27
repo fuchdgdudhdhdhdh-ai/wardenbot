@@ -466,7 +466,12 @@ async def read_news(c: CallbackQuery):
     article = '🗞 ' + str(n['title']) + '\n\n' + body + stamp
     if len(article) > 4000:
         article = article[:3950] + '\n\n…Текст сокращён.'
-    await edit_panel(c, article, reply_markup=kb([[('К списку новостей', 'news')], [('В меню', 'home')]]))
+    markup = kb([[('К списку новостей', 'news')], [('В меню', 'home')]])
+    try:
+        await edit_panel(c, article, reply_markup=markup, disable_web_page_preview=True)
+    except Exception:
+        log.exception("Не удалось открыть новость #%s через редактирование сообщения", news_id)
+        await bot.send_message(c.from_user.id, article, reply_markup=markup, disable_web_page_preview=True)
 
 @dp.callback_query(F.data == "team")
 async def team_menu(c: CallbackQuery):
@@ -1256,8 +1261,9 @@ async def news_body(m:Message,state:FSMContext):
 async def balance_plus(m: Message):
     if not await require_admin(m): return await deny_admin_command(m)
     parts = (m.text or "").split()
-    if len(parts) == 2 and m.reply_to_message:
-        uid, raw_amount = m.reply_to_message.from_user.id, parts[1]
+    if len(parts) == 2:
+        uid = m.reply_to_message.from_user.id if m.reply_to_message else m.from_user.id
+        raw_amount = parts[1]
     elif len(parts) == 3 and parts[1].isdigit():
         uid, raw_amount = int(parts[1]), parts[2]
     else:
@@ -1275,8 +1281,9 @@ async def balance_plus(m: Message):
 async def balance_minus(m: Message):
     if not await require_admin(m): return await deny_admin_command(m)
     parts = (m.text or "").split()
-    if len(parts) == 2 and m.reply_to_message:
-        uid, raw_amount = m.reply_to_message.from_user.id, parts[1]
+    if len(parts) == 2:
+        uid = m.reply_to_message.from_user.id if m.reply_to_message else m.from_user.id
+        raw_amount = parts[1]
     elif len(parts) == 3 and parts[1].isdigit():
         uid, raw_amount = int(parts[1]), parts[2]
     else:

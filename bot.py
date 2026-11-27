@@ -194,7 +194,7 @@ async def home(c: CallbackQuery, state: FSMContext):
     if not u or not await member_ok(c.from_user.id):
         await edit_panel(c, "Сначала вступите в команду: " + INVITE)
     else:
-        await c.message.answer("Главное меню Warden Team:", reply_markup=main_kb())
+        await edit_panel(c, "Главное меню Warden Team:", reply_markup=main_kb())
     await c.answer()
 
 @dp.callback_query(F.data == "profile")
@@ -224,13 +224,13 @@ async def profile(c: CallbackQuery):
     if PROFILE_PHOTO_ID:
         await edit_panel(c, text, reply_markup=kb(rows))
     else:
-        await c.message.answer(text, reply_markup=kb(rows))
+        await edit_panel(c, text, reply_markup=kb(rows))
     await c.answer()
 
 @dp.callback_query(F.data == "unmentor")
 async def unmentor(c: CallbackQuery):
     await db.run("UPDATE users SET mentor_id=NULL WHERE id=?", (c.from_user.id,))
-    await c.message.answer("Вы отвязались от наставника. Теперь действует стандартный прайс.")
+    await edit_panel(c, "Вы отвязались от наставника. Теперь действует стандартный прайс.")
     await c.answer()
 
 @dp.callback_query(F.data == "payout")
@@ -260,7 +260,7 @@ async def payout(c: CallbackQuery, state: FSMContext):
         return await c.answer(str(e), show_alert=True)
     await state.update_data(payout_id=req_id)
     await state.set_state(Flow.payout_invoice)
-    await c.message.answer(f"Заявка #{req_id}: {payable_leads} лидов × ${price:.2f} = ${amount:.2f}.\n"
+    await edit_panel(c, f"Заявка #{req_id}: {payable_leads} лидов × ${price:.2f} = ${amount:.2f}.\n"
                            "Пожалуйста пришлите свой счет в CryptoBot.\n\n"
                            "Инструкция: Откройте главное меню крипто бота ⮕ Счета ⮕ Создать счёт ⮕ "
                            "Многоразовый ⮕ USDT ⮕ Далее ⮕ Скопируйте ссылку и отправьте её сюда.",
@@ -288,14 +288,14 @@ async def admin_ids():
 async def offers(c: CallbackQuery):
     items = await db.all("SELECT * FROM offers WHERE active=1 ORDER BY id")
     if not items:
-        await c.message.answer("Пока нет доступных офферов.", reply_markup=back_menu())
+        await edit_panel(c, "Пока нет доступных офферов.", reply_markup=back_menu())
     else:
         rows = [[(f"{x['title']} - {x['price']:.2f}$",f"offer:{x['id']}")] for x in items]
         rows.append([("Назад ↩️","home")])
         if OFFERS_VIDEO_ID:
             await edit_panel(c, "Выбери канал на который будешь лить трафик:", reply_markup=kb(rows))
         else:
-            await c.message.answer("Выбери канал на который будешь лить трафик:", reply_markup=kb(rows))
+            await edit_panel(c, "Выбери канал на который будешь лить трафик:", reply_markup=kb(rows))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("offer:"))
@@ -303,7 +303,7 @@ async def offer_detail(c: CallbackQuery):
     oid = int(c.data.split(":")[1])
     o = await db.one("SELECT * FROM offers WHERE id=? AND active=1",(oid,))
     if not o: return await c.answer("Оффер недоступен",show_alert=True)
-    await c.message.answer(f"{o['title']}\nКурс: {o['price']}$\nМинимально лидов: {o['min_leads']}\nКанал: {o['channel']}\n\nВы точно хотите выбрать этот офер?",
+    await edit_panel(c, f"{o['title']}\nКурс: {o['price']}$\nМинимально лидов: {o['min_leads']}\nКанал: {o['channel']}\n\nВы точно хотите выбрать этот офер?",
                            reply_markup=kb([[("Да ✅",f"take:{oid}")],[("Назад ↩️","offers")]]))
     await c.answer()
 
@@ -314,22 +314,22 @@ async def take_link(c: CallbackQuery):
     if current and current["current_link_id"]:
         return await c.answer("У вас уже есть активная ссылка. Обратитесь к администратору для её замены.", show_alert=True)
     link = await db.take_link(c.from_user.id, oid)
-    if not link: return await c.message.answer("Свободных ссылок для этого оффера нет. Обратитесь к администратору.")
-    await c.message.answer(f"Вы успешно взяли ссылку!\nВаш номер: {link['id']}\nВаша ссылка: {link['url']}\n\nВы можете посмотреть свою ссылку в профиле в любой момент",
+    if not link: return await edit_panel(c, "Свободных ссылок для этого оффера нет. Обратитесь к администратору.")
+    await edit_panel(c, f"Вы успешно взяли ссылку!\nВаш номер: {link['id']}\nВаша ссылка: {link['url']}\n\nВы можете посмотреть свою ссылку в профиле в любой момент",
                            reply_markup=kb([[("В меню","home")]]))
     await c.answer()
 
 @dp.callback_query(F.data == "news")
 async def news(c: CallbackQuery):
     items = await db.all("SELECT * FROM news ORDER BY id DESC LIMIT 20")
-    await c.message.answer("Ознакомиться с актуальными данными, конкурсами или прайсами можно тут:",
+    await edit_panel(c, "Ознакомиться с актуальными данными, конкурсами или прайсами можно тут:",
                            reply_markup=kb([[ (x["title"],f"readnews:{x['id']}")] for x in items] + [[("Назад ↩️","home")]]))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("readnews:"))
 async def read_news(c: CallbackQuery):
     n = await db.one("SELECT * FROM news WHERE id=?",(int(c.data.split(":")[1]),))
-    if n: await c.message.answer(n["title"]+"\n\n"+n["body"]+("\n"+n["url"] if n["url"] else ""),reply_markup=back_menu())
+    if n: await edit_panel(c, n["title"]+"\n\n"+n["body"]+("\n"+n["url"] if n["url"] else ""),reply_markup=back_menu())
     await c.answer()
 
 @dp.callback_query(F.data == "team")
@@ -343,11 +343,11 @@ async def team_menu(c: CallbackQuery):
         if TEAM_MENU_PHOTO_ID:
             await edit_panel(c, caption, reply_markup=markup)
         else:
-            await c.message.answer(caption, reply_markup=markup)
+            await edit_panel(c, caption, reply_markup=markup)
     elif t:
-        await c.message.answer(f"Вы состоите в команде «{t['name']}» ({t['tag']}).\nДля управления командой доступны функции владельца.", reply_markup=back_menu())
+        await edit_panel(c, f"Вы состоите в команде «{t['name']}» ({t['tag']}).\nДля управления командой доступны функции владельца.", reply_markup=back_menu())
     else:
-        await c.message.answer("Привет! Если ты хочешь, чтобы тебе помогали в трафике или хочешь помогать в трафике, нажимай подходящую кнопку 👇",
+        await edit_panel(c, "Привет! Если ты хочешь, чтобы тебе помогали в трафике или хочешь помогать в трафике, нажимай подходящую кнопку 👇",
             reply_markup=kb([[ ("Создать команду ➕","team_create")],[("Вступить в команду 👥","team_join")],[("Назад ↩️","home")]]))
     await c.answer()
 
@@ -355,9 +355,9 @@ async def team_menu(c: CallbackQuery):
 async def team_create(c: CallbackQuery,state: FSMContext):
     u=await user_row(c.from_user.id)
     if not u or u["role"]!="Наставник":
-        await c.message.answer("❌ Сначала нужно повысится на должность «Наставник», а затем создавать команду.")
+        await edit_panel(c, "❌ Сначала нужно повысится на должность «Наставник», а затем создавать команду.")
     else:
-        await state.set_state(Flow.team_name); await c.message.answer("Введите название команды:")
+        await state.set_state(Flow.team_name); await edit_panel(c, "Введите название команды:")
     await c.answer()
 
 @dp.message(Flow.team_name)
@@ -381,16 +381,16 @@ async def team_confirm(c:CallbackQuery,state:FSMContext):
     if not d.get("team_name") or not u or u["role"]!="Наставник": return await c.answer("Сессия истекла",show_alert=True)
     existing=await db.one("SELECT * FROM teams WHERE owner_id=?",(u["id"],))
     if existing:
-        await state.clear(); await c.message.answer(f"У вас уже есть команда: {existing['name']}.",reply_markup=back_menu()); return await c.answer()
+        await state.clear(); await edit_panel(c, f"У вас уже есть команда: {existing['name']}.",reply_markup=back_menu()); return await c.answer()
     tid=await db.run("INSERT INTO teams(owner_id,name,tag,created_at) VALUES(?,?,?,?)",
                      (u["id"],d["team_name"],d["team_tag"],now()))
     await db.run("UPDATE users SET team_id=? WHERE id=?",(tid,u["id"]))
-    await state.clear(); await c.message.answer(f"Команда {d['team_name']} создана!",reply_markup=back_menu()); await c.answer()
+    await state.clear(); await edit_panel(c, f"Команда {d['team_name']} создана!",reply_markup=back_menu()); await c.answer()
 
 @dp.callback_query(F.data=="team_join")
 async def team_join(c:CallbackQuery):
     teams=await db.all("SELECT * FROM teams ORDER BY id")
-    await c.message.answer("Выбери команду в которую хочешь вступить:",
+    await edit_panel(c, "Выбери команду в которую хочешь вступить:",
         reply_markup=kb([[(f"{t['tag']} — {await team_rating(t['id'])}⭐",f"jointeam:{t['id']}")] for t in teams]+[[("Назад ↩️","team")]]))
     await c.answer()
 
@@ -408,7 +408,7 @@ async def join_team(c:CallbackQuery):
         return await c.answer("Вы уже состоите в другой команде. Сначала выйдите из неё.",show_alert=True)
     if t["owner_id"] == c.from_user.id:
         return await c.answer("Вы владелец этой команды.",show_alert=True)
-    await c.message.answer(f"Вы выбрали команду:\nНазвание команды: {t['name']}\nРейтинг: {await team_rating(tid)}\nСокращение: {t['tag']}.",
+    await edit_panel(c, f"Вы выбрали команду:\nНазвание команды: {t['name']}\nРейтинг: {await team_rating(tid)}\nСокращение: {t['tag']}.",
         reply_markup=kb([[("Вступить 👉",f"joinconfirm:{tid}")],[("Назад ↩️","team_join")]]))
     await c.answer()
 
@@ -417,7 +417,7 @@ async def join_confirm(c:CallbackQuery):
     tid=int(c.data.split(":")[1]); t=await db.one("SELECT * FROM teams WHERE id=?",(tid,))
     if t:
         await db.run("UPDATE users SET team_id=? WHERE id=?",(tid,c.from_user.id))
-        await c.message.answer(f"Вы успешно вступили в команду {t['name']} ✅",reply_markup=back_menu())
+        await edit_panel(c, f"Вы успешно вступили в команду {t['name']} ✅",reply_markup=back_menu())
     await c.answer()
 
 @dp.callback_query(F.data=="team_members")
@@ -426,14 +426,14 @@ async def team_members(c:CallbackQuery):
     if not t: return await c.answer("Нет команды",show_alert=True)
     members=await db.all("SELECT id,username,first_name FROM users WHERE team_id=? AND id<>?",(t["id"],c.from_user.id))
     rows=[[(("@"+x["username"]) if x["username"] else x["first_name"],f"kick:{x['id']}")] for x in members]
-    await c.message.answer(f"Всего в команде {len(members)+1} участников, детально:",reply_markup=kb(rows+[[("Назад ↩️","team")]]))
+    await edit_panel(c, f"Всего в команде {len(members)+1} участников, детально:",reply_markup=kb(rows+[[("Назад ↩️","team")]]))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("kick:"))
 async def kick_member(c:CallbackQuery):
     uid=int(c.data.split(":")[1]); t=await db.one("SELECT * FROM teams WHERE owner_id=?",(c.from_user.id,))
     if t: await db.run("UPDATE users SET team_id=NULL WHERE id=? AND team_id=?",(uid,t["id"]))
-    await c.message.answer("Участник исключён.",reply_markup=back_menu()); await c.answer()
+    await edit_panel(c, "Участник исключён.",reply_markup=back_menu()); await c.answer()
 
 @dp.callback_query(F.data=="team_delete")
 async def team_delete(c:CallbackQuery):
@@ -442,7 +442,7 @@ async def team_delete(c:CallbackQuery):
         await db.run("UPDATE users SET team_id=NULL WHERE team_id=?",(t["id"],))
         await db.run("DELETE FROM events WHERE team_id=?",(t["id"],))
         await db.run("DELETE FROM teams WHERE id=?",(t["id"],))
-    await c.message.answer("Команда расформирована.",reply_markup=back_menu()); await c.answer()
+    await edit_panel(c, "Команда расформирована.",reply_markup=back_menu()); await c.answer()
 
 @dp.callback_query(F.data=="team_stats")
 async def team_stats(c:CallbackQuery):
@@ -451,19 +451,19 @@ async def team_stats(c:CallbackQuery):
     count=await db.one("SELECT COUNT(*) n FROM users WHERE team_id=? AND id<>?",(t["id"],c.from_user.id))
     profit=await db.one("SELECT COALESCE(SUM(amount),0) n FROM payout_requests p JOIN users u ON u.id=p.user_id WHERE u.team_id=? AND p.status='paid'",(t["id"],))
     age=(datetime.now(timezone.utc)-datetime.fromisoformat(t["created_at"])).days
-    await c.message.answer(f"Здравствуйте, {c.from_user.username or c.from_user.first_name}, статистика команды {t['name']}:\n\n👥Всего траферов: {count['n']}\n🤑Общий профит: ${profit['n']:.2f}\n👦Возраст команды: {age} дней\n⭐Рейтинг: {await team_rating(t['id'])}%",reply_markup=back_menu())
+    await edit_panel(c, f"Здравствуйте, {c.from_user.username or c.from_user.first_name}, статистика команды {t['name']}:\n\n👥Всего траферов: {count['n']}\n🤑Общий профит: ${profit['n']:.2f}\n👦Возраст команды: {age} дней\n⭐Рейтинг: {await team_rating(t['id'])}%",reply_markup=back_menu())
     await c.answer()
 
 @dp.callback_query(F.data=="events")
 async def events(c:CallbackQuery):
     t=await db.one("SELECT * FROM teams WHERE owner_id=?",(c.from_user.id,))
     if not t: return await c.answer()
-    await c.message.answer("Мероприятия:",reply_markup=kb([[("Мои Мероприятия","my_events")],[("Создать Мероприятие","event_create")],[("Назад ↩️","team")]]))
+    await edit_panel(c, "Мероприятия:",reply_markup=kb([[("Мои Мероприятия","my_events")],[("Создать Мероприятие","event_create")],[("Назад ↩️","team")]]))
     await c.answer()
 
 @dp.callback_query(F.data=="event_create")
 async def event_create(c:CallbackQuery,state:FSMContext):
-    await state.set_state(Flow.event_title); await c.message.answer("Введи название мероприятия (до 15 символов):"); await c.answer()
+    await state.set_state(Flow.event_title); await edit_panel(c, "Введи название мероприятия (до 15 символов):"); await c.answer()
 
 @dp.message(Flow.event_title)
 async def event_title(m:Message,state:FSMContext):
@@ -481,20 +481,20 @@ async def event_body(m:Message,state:FSMContext):
 async def my_events(c:CallbackQuery):
     t=await db.one("SELECT * FROM teams WHERE owner_id=?",(c.from_user.id,))
     ev=await db.all("SELECT * FROM events WHERE team_id=? ORDER BY id DESC",(t["id"],)) if t else []
-    await c.message.answer("Ваши мероприятия:",reply_markup=kb([[(e["title"],f"event:{e['id']}")] for e in ev]+[[("Назад ↩️","events")]]))
+    await edit_panel(c, "Ваши мероприятия:",reply_markup=kb([[(e["title"],f"event:{e['id']}")] for e in ev]+[[("Назад ↩️","events")]]))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("event:"))
 async def event_open(c:CallbackQuery):
     e=await db.one("SELECT * FROM events WHERE id=?",(int(c.data.split(":")[1]),))
-    if e: await c.message.answer(e["title"]+"\n\n"+e["body"],reply_markup=kb([[("Удалить ✖️",f"eventdel:{e['id']}")],[("Назад ↩️","my_events")]]))
+    if e: await edit_panel(c, e["title"]+"\n\n"+e["body"],reply_markup=kb([[("Удалить ✖️",f"eventdel:{e['id']}")],[("Назад ↩️","my_events")]]))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("eventdel:"))
 async def event_delete(c:CallbackQuery):
     eid=int(c.data.split(":")[1]); t=await db.one("SELECT * FROM teams WHERE owner_id=?",(c.from_user.id,))
     if t: await db.run("DELETE FROM events WHERE id=? AND team_id=?",(eid,t["id"]))
-    await c.message.answer("Мероприятие удалено.",reply_markup=back_menu()); await c.answer()
+    await edit_panel(c, "Мероприятие удалено.",reply_markup=back_menu()); await c.answer()
 
 @dp.callback_query(F.data=="learning")
 async def learning(c:CallbackQuery):
@@ -504,7 +504,7 @@ async def learning(c:CallbackQuery):
     pupils=await db.one("SELECT COUNT(*) n FROM users WHERE mentor_id=?",(u["id"],))
     earned=await db.one("""SELECT COALESCE(SUM(p.leads)*0.1,0) n FROM payout_requests p
                            WHERE p.mentor_id=? AND p.status='paid'""",(u["id"],))
-    await c.message.answer(f"Ваша ссылка: https://t.me/{(await bot.get_me()).username}?start=ref_{u['id']}\n"
+    await edit_panel(c, f"Ваша ссылка: https://t.me/{(await bot.get_me()).username}?start=ref_{u['id']}\n"
                            f"Кол-во обучающихся: {pupils['n']}/2\nСколько вы заработали: ${earned['n']:.2f}",
                            reply_markup=back_menu())
     await c.answer()
@@ -516,9 +516,9 @@ ROLE_LEVEL = {"Новичок": 0, "Трафер": 1, "Опытный": 2, "На
 async def free_accounts(c: CallbackQuery):
     u = await user_row(c.from_user.id)
     if not u or ROLE_LEVEL.get(u["role"], 0) < ROLE_LEVEL["Трафер"]:
-        await c.message.answer('Недоступно для вашей должности, минимальная должность: «Трафер».', reply_markup=back_menu())
+        await edit_panel(c, 'Недоступно для вашей должности, минимальная должность: «Трафер».', reply_markup=back_menu())
     else:
-        await c.message.answer(
+        await edit_panel(c, 
             "Выберите тип аккаунтов:\n\n"
             "❄️ Обычные аккаунты — демонстрационные слоты обычного класса.\n"
             "🌟 Премиум аккаунты — демонстрационные слоты премиум-класса.",
@@ -537,7 +537,7 @@ async def demo_type(c: CallbackQuery):
         return await c.answer(f"Премиум доступен с должности «{min_role}».", show_alert=True)
     title = "Премиум" if kind == "premium" else "Обычные"
     count = await db.one("SELECT COUNT(*) n FROM demo_account_slots WHERE account_type=? AND status='available'", (kind,))
-    await c.message.answer(
+    await edit_panel(c, 
         f"{title} — демонстрационный каталог\nДоступно тестовых слотов: {count['n']}\n\n"
         "Это учебная имитация: реальные Telegram-аккаунты и данные для входа не выдаются.",
         reply_markup=kb([[('Получить тестовый слот', f'demo_take:{kind}')], [('Назад ↩️', 'free_accounts')]])
@@ -568,7 +568,7 @@ async def demo_take(c: CallbackQuery):
         await c.answer("Свободных тестовых слотов пока нет.", show_alert=True)
     else:
         await db.audit(c.from_user.id, "demo_slot_assigned", slot['id'], f"type={kind}; label={slot['label']}")
-        await c.message.answer(
+        await edit_panel(c, 
             f"Тестовый слот #{slot['id']} назначен вам.\nМетка: {slot['label']}\n\n"
             "Это только демонстрационная запись: номера, кода авторизации и реального аккаунта здесь нет.",
             reply_markup=kb([[('Открыть демо-панель', f'demo_open:{slot["id"]}')], [('В меню', 'home')]])
@@ -582,7 +582,7 @@ async def demo_open(c: CallbackQuery):
     slot = await db.one("SELECT * FROM demo_account_slots WHERE id=?", (slot_id,))
     if not slot or slot['assigned_user'] != c.from_user.id:
         return await c.answer("Этот слот вам не назначен", show_alert=True)
-    await c.message.answer(
+    await edit_panel(c, 
         f"Демо-панель слота #{slot_id}\nСтатус: {'завершён' if slot['status']=='completed' else 'назначен'}\n\n"
         "В настоящую авторизацию здесь не выполняется вход. Нажмите кнопку, чтобы завершить учебный сценарий.",
         reply_markup=kb([[('Завершить демо-сценарий', f'demo_complete:{slot_id}')], [('В меню', 'home')]])
@@ -598,7 +598,7 @@ async def demo_complete(c: CallbackQuery):
         return await c.answer("Этот слот вам не назначен", show_alert=True)
     if slot['status'] == 'assigned':
         await db.run("UPDATE demo_account_slots SET status='completed',completed_at=? WHERE id=? AND assigned_user=? AND status='assigned'", (now(), slot_id, c.from_user.id))
-    await c.message.answer("Демо-сценарий завершён. Спасибо!", reply_markup=back_menu())
+    await edit_panel(c, "Демо-сценарий завершён. Спасибо!", reply_markup=back_menu())
     await c.answer()
 
 # ---------------- ADMIN ----------------
@@ -619,33 +619,33 @@ async def admin_router(c:CallbackQuery,state:FSMContext):
     action=c.data
     if action=="adm_users":
         users=await db.all("SELECT * FROM users ORDER BY joined_at DESC LIMIT 100")
-        await c.message.answer("Участники:",reply_markup=kb([[(("@"+u["username"]) if u["username"] else str(u["first_name"]),f"admuser:{u['id']}")] for u in users]+[[("Назад ↩️","home")]]))
+        await edit_panel(c, "Участники:",reply_markup=kb([[(("@"+u["username"]) if u["username"] else str(u["first_name"]),f"admuser:{u['id']}")] for u in users]+[[("Назад ↩️","home")]]))
     elif action=="adm_offers":
-        await c.message.answer("Выбери действие:",reply_markup=kb([[("Добавить ссылки🔗","adm_addlinks")],[("Прикрепить статистику📊","adm_stats")],[("Назад ↩️","home")]]))
+        await edit_panel(c, "Выбери действие:",reply_markup=kb([[("Добавить ссылки🔗","adm_addlinks")],[("Прикрепить статистику📊","adm_stats")],[("Назад ↩️","home")]]))
     elif action=="adm_payouts":
         reqs=await db.all("""SELECT p.* FROM payout_requests p JOIN users u ON u.id=p.user_id
                            WHERE p.status='pending'
                            ORDER BY CASE u.role WHEN 'Наставник' THEN 0 WHEN 'Опытный' THEN 1
                            WHEN 'Трафер' THEN 2 ELSE 3 END, p.created_at ASC""")
-        await c.message.answer("Заявки на выплату:",reply_markup=kb([[(f"{r['leads']} пдп — ${r['amount']:.2f}",f"payoutreq:{r['id']}")] for r in reqs]+[[("Назад ↩️","home")]]))
+        await edit_panel(c, "Заявки на выплату:",reply_markup=kb([[(f"{r['leads']} пдп — ${r['amount']:.2f}",f"payoutreq:{r['id']}")] for r in reqs]+[[("Назад ↩️","home")]]))
     elif action=="adm_add":
-        await state.set_state(Flow.add_admin); await c.message.answer("Введите id пользователя для добавления в администрацию:")
+        await state.set_state(Flow.add_admin); await edit_panel(c, "Введите id пользователя для добавления в администрацию:")
     elif action=="adm_news":
-        await state.set_state(Flow.news_title); await c.message.answer("Введите заголовок новости:")
+        await state.set_state(Flow.news_title); await edit_panel(c, "Введите заголовок новости:")
     elif action=="adm_stock":
         ordinary = await db.one("SELECT COUNT(*) n FROM demo_account_slots WHERE account_type='ordinary' AND status='available'")
         premium = await db.one("SELECT COUNT(*) n FROM demo_account_slots WHERE account_type='premium' AND status='available'")
         assigned = await db.one("SELECT COUNT(*) n FROM demo_account_slots WHERE status='assigned'")
-        await c.message.answer(
+        await edit_panel(c, 
             f"Тестовый склад\n❄️ Обычные свободны: {ordinary['n']}\n🌟 Премиум свободны: {premium['n']}\nНазначено участникам: {assigned['n']}\n\n"
             "Добавляются только тестовые слоты, без телефонных номеров и данных авторизации.",
             reply_markup=kb([[('Завезти обычный акк', 'stock_add:ordinary')], [('Завезти премиум акк', 'stock_add:premium')], [('Назад ↩️', 'home')]])
         )
     elif action=="adm_addlinks":
-        await state.set_state(Flow.offer_title); await c.message.answer("Для добавления офера укажи его название:")
+        await state.set_state(Flow.offer_title); await edit_panel(c, "Для добавления офера укажи его название:")
     elif action=="adm_stats":
         links=await db.all("SELECT * FROM links ORDER BY id")
-        await c.message.answer("Выберите ссылку:",reply_markup=kb([[(f"{x['id']} ссылка",f"linkstats:{x['id']}")] for x in links]+[[("Назад ↩️","adm_offers")]]))
+        await edit_panel(c, "Выберите ссылку:",reply_markup=kb([[(f"{x['id']} ссылка",f"linkstats:{x['id']}")] for x in links]+[[("Назад ↩️","adm_offers")]]))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("stock_add:"))
@@ -655,7 +655,7 @@ async def stock_add_start(c: CallbackQuery, state: FSMContext):
     if kind not in ("ordinary", "premium"): return await c.answer("Некорректный тип", show_alert=True)
     await state.update_data(demo_stock_type=kind)
     await state.set_state(Flow.demo_stock_label)
-    await c.message.answer("Введите метку тестового слота (например, DEMO-001). Не отправляйте номер телефона, код, пароль или файл сессии.")
+    await edit_panel(c, "Введите метку тестового слота (например, DEMO-001). Не отправляйте номер телефона, код, пароль или файл сессии.")
     await c.answer()
 
 @dp.message(Flow.demo_stock_label)
@@ -680,7 +680,7 @@ async def admin_user(c:CallbackQuery):
     if not u: return await c.answer("Пользователь не найден",show_alert=True)
     count=await db.one("SELECT COUNT(*) n FROM links WHERE assigned_user=?",(uid,))
     paid=await db.one("SELECT COALESCE(SUM(amount),0) n FROM payout_requests WHERE user_id=? AND status='paid'",(uid,))
-    await c.message.answer(f"Участник {u['first_name']} (@{u['username'] or 'нет'})\nID: {uid}\nРегистрация: {u['joined_at']}\nВзято ссылок: {count['n']}\nЗаработал: ${paid['n']:.2f}\nДолжность: {u['role']}",
+    await edit_panel(c, f"Участник {u['first_name']} (@{u['username'] or 'нет'})\nID: {uid}\nРегистрация: {u['joined_at']}\nВзято ссылок: {count['n']}\nЗаработал: ${paid['n']:.2f}\nДолжность: {u['role']}",
       reply_markup=kb([[("Бан ⛔",f"ban:{uid}")],[("Ограничить доступ ⚠️",f"restrict:{uid}")],
                        [("Забрать ссылку🫴",f"revoke:{uid}")],[("Управление должностью🚀",f"role:{uid}")],
                        [("Назад↩️","adm_users")]]))
@@ -690,13 +690,13 @@ async def admin_user(c:CallbackQuery):
 async def ban_user(c:CallbackQuery):
     if not await require_admin(c): return await c.answer("Нет доступа",show_alert=True)
     uid=int(c.data.split(":")[1]); await db.run("UPDATE users SET banned=1 WHERE id=?",(uid,)); await db.audit(c.from_user.id,"user_banned",uid)
-    await c.message.answer("Пользователь заблокирован."); await c.answer()
+    await edit_panel(c, "Пользователь заблокирован."); await c.answer()
 
 @dp.callback_query(F.data.startswith("restrict:"))
 async def restrict(c:CallbackQuery):
     if not await require_admin(c): return await c.answer("Нет доступа",show_alert=True)
     uid=int(c.data.split(":")[1])
-    await c.message.answer("На какой срок ограничить доступ?",reply_markup=kb([[("1 час",f"restrictset:{uid}:1")],[("1 день",f"restrictset:{uid}:24")],[("Месяц",f"restrictset:{uid}:720")],[("Назад","adm_users")]]))
+    await edit_panel(c, "На какой срок ограничить доступ?",reply_markup=kb([[("1 час",f"restrictset:{uid}:1")],[("1 день",f"restrictset:{uid}:24")],[("Месяц",f"restrictset:{uid}:720")],[("Назад","adm_users")]]))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("restrictset:"))
@@ -705,13 +705,13 @@ async def restrict_set(c:CallbackQuery):
     _,uid,hours=c.data.split(":")
     until=(datetime.now(timezone.utc)+timedelta(hours=int(hours))).isoformat()
     await db.run("UPDATE users SET restricted_until=? WHERE id=?",(until,int(uid))); await db.audit(c.from_user.id,"user_restricted",int(uid),f"hours={hours}")
-    await c.message.answer("Доступ ограничен."); await c.answer()
+    await edit_panel(c, "Доступ ограничен."); await c.answer()
 
 @dp.callback_query(F.data.startswith("revoke:"))
 async def revoke(c:CallbackQuery,state:FSMContext):
     if not await require_admin(c): return await c.answer("Нет доступа",show_alert=True)
     uid=int(c.data.split(":")[1]); await state.update_data(revoke_uid=uid)
-    await state.set_state(Flow.admin_reason); await c.message.answer("Введите причину по которой отбираете ссылку:"); await c.answer()
+    await state.set_state(Flow.admin_reason); await edit_panel(c, "Введите причину по которой отбираете ссылку:"); await c.answer()
 
 @dp.message(Flow.admin_reason)
 async def revoke_reason(m:Message,state:FSMContext):
@@ -732,7 +732,7 @@ async def role_menu(c:CallbackQuery):
     if u["role"]!="Наставник": rows.append([("Повысить📈",f"roleup:{uid}")])
     if u["role"]!="Новичок": rows.append([("Понизить📉",f"roledown:{uid}")])
     rows.append([("Назад↩️","adm_users")])
-    await c.message.answer("Выберите кнопку ниже, чтобы управлять должностью:",reply_markup=kb(rows)); await c.answer()
+    await edit_panel(c, "Выберите кнопку ниже, чтобы управлять должностью:",reply_markup=kb(rows)); await c.answer()
 
 async def change_role(c,uid,up):
     u=await user_row(uid); idx=ROLES.index(u["role"])
@@ -747,7 +747,7 @@ async def change_role(c,uid,up):
             await db.run("UPDATE users SET team_id=NULL WHERE team_id=?",(t["id"],))
             await db.run("DELETE FROM events WHERE team_id=?",(t["id"],))
             await db.run("DELETE FROM teams WHERE id=?",(t["id"],))
-    await c.message.answer(f"Новая должность: {new}"); await c.answer()
+    await edit_panel(c, f"Новая должность: {new}"); await c.answer()
 
 @dp.callback_query(F.data.startswith("roleup:"))
 async def role_up(c:CallbackQuery):
@@ -822,7 +822,7 @@ async def link_stats(c:CallbackQuery):
     if not await require_admin(c): return await c.answer("Нет доступа",show_alert=True)
     lid=int(c.data.split(":")[1]); link=await db.one("SELECT * FROM links WHERE id=?",(lid,))
     if not link: return await c.answer("Ссылка не найдена")
-    await c.message.answer("Выберете что нужно сделать со ссылкой:",reply_markup=kb([[("+1 лид",f"lead:{lid}:1")],[("-1 лид",f"lead:{lid}:-1")],[("Назад ↩️","adm_offers")]]))
+    await edit_panel(c, "Выберете что нужно сделать со ссылкой:",reply_markup=kb([[("+1 лид",f"lead:{lid}:1")],[("-1 лид",f"lead:{lid}:-1")],[("Назад ↩️","adm_offers")]]))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("lead:"))
@@ -841,10 +841,10 @@ async def lead_change(c:CallbackQuery):
         await db.run("INSERT INTO lead_log(user_id,link_id,delta,created_at,admin_id) VALUES(?,?,?,?,?)",
                      (link["assigned_user"],int(lid),int(delta),now(),c.from_user.id))
         await db.audit(c.from_user.id,"lead_adjusted",link["assigned_user"],f"link={lid}; delta={delta}")
-        await c.message.answer("Статистика обновлена.")
+        await edit_panel(c, "Статистика обновлена.")
         try: await c.message.edit_reply_markup(reply_markup=None)
         except Exception: pass
-    else: await c.message.answer("Ссылка ещё не выдана участнику.")
+    else: await edit_panel(c, "Ссылка ещё не выдана участнику.")
     await c.answer()
 
 @dp.callback_query(F.data.startswith("payoutreq:"))
@@ -856,9 +856,9 @@ async def payout_detail(c:CallbackQuery):
     details = (f"Трафер: @{u['username'] or u['first_name']}\nНомер ссылки: {r['link_id']}\n"
         f"Кол-во лидов: {r['leads']}\nСумма к оплате: ${r['amount']:.2f}\nСчет для оплаты: {r['invoice'] or 'не прислан'}")
     if not r["invoice"]:
-        await c.message.answer(details + "\n\nОжидается ссылка на счёт CryptoBot от участника.", reply_markup=back_menu())
+        await edit_panel(c, details + "\n\nОжидается ссылка на счёт CryptoBot от участника.", reply_markup=back_menu())
     else:
-        await c.message.answer(details, reply_markup=kb([[ ("Оплачено ✅",f"paid:{rid}")],[ ("Срезать ✂️",f"cut:{rid}")],[ ("Отклонить ❌",f"reject:{rid}")],[ ("Назад ↩️","adm_payouts")]]))
+        await edit_panel(c, details, reply_markup=kb([[ ("Оплачено ✅",f"paid:{rid}")],[ ("Срезать ✂️",f"cut:{rid}")],[ ("Отклонить ❌",f"reject:{rid}")],[ ("Назад ↩️","adm_payouts")]]))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("paid:"))
@@ -870,7 +870,7 @@ async def payout_paid(c:CallbackQuery):
     if not settled: return await c.answer("Заявка уже обработана",show_alert=True)
     await db.audit(c.from_user.id,"payout_paid",settled["user_id"],f"request={rid}; amount={settled['amount']}")
     await bot.send_message(settled["user_id"],f"Вам пришла выплата в размере ${settled['amount']:.2f} на CryptoBot. Срезов нет")
-    await c.message.answer("Заявка отмечена как оплаченная."); await c.answer()
+    await edit_panel(c, "Заявка отмечена как оплаченная."); await c.answer()
 
 @dp.callback_query(F.data.startswith("reject:"))
 async def payout_reject(c:CallbackQuery):
@@ -882,7 +882,7 @@ async def payout_reject(c:CallbackQuery):
     await db.audit(c.from_user.id,"payout_rejected",settled["user_id"],f"request={rid}")
     try: await bot.send_message(settled["user_id"],f"Ваша заявка на выплату #{rid} отклонена администрацией. Обратитесь к администратору за подробностями.")
     except Exception: pass
-    await c.message.answer("Заявка отклонена; лиды не списаны и могут быть поданы повторно.")
+    await edit_panel(c, "Заявка отклонена; лиды не списаны и могут быть поданы повторно.")
     await c.answer()
 
 @dp.callback_query(F.data.startswith("cut:"))
@@ -891,7 +891,7 @@ async def payout_cut(c:CallbackQuery,state:FSMContext):
     rid=int(c.data.split(":")[1]); req=await db.one("SELECT * FROM payout_requests WHERE id=?",(rid,))
     if not req or not req["invoice"]: return await c.answer("Счёт CryptoBot ещё не получен",show_alert=True)
     await state.update_data(cut_request=rid)
-    await state.set_state(Flow.admin_cut); await c.message.answer("Сколько лидов срезать?"); await c.answer()
+    await state.set_state(Flow.admin_cut); await edit_panel(c, "Сколько лидов срезать?"); await c.answer()
 
 @dp.message(Flow.admin_cut)
 async def payout_cut_count(m:Message,state:FSMContext):
@@ -922,10 +922,10 @@ async def add_admin_confirm(c:CallbackQuery,state:FSMContext):
     d=await state.get_data(); uid=d.get("new_admin")
     if c.data=="addadmin_yes" and uid:
         await db.run("INSERT OR IGNORE INTO admins(user_id,added_at) VALUES(?,?)",(uid,now())); await db.audit(c.from_user.id,"admin_added",uid)
-        await c.message.answer(f"Пользователь {uid} теперь администратор! Для удаления используйте /admdel_{uid}")
+        await edit_panel(c, f"Пользователь {uid} теперь администратор! Для удаления используйте /admdel_{uid}")
         try: await bot.send_message(uid,"Поздравляем! Вы стали администратором!")
         except: pass
-    else: await c.message.answer("Действие отменено.")
+    else: await edit_panel(c, "Действие отменено.")
     await state.clear(); await c.answer()
 
 @dp.message(F.text.regexp(r"^/admdel_\d+$"))

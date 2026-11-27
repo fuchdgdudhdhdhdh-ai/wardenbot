@@ -79,7 +79,7 @@ def kb(rows):
     ])
 
 def main_kb():
-    return kb([[("👤Мой профиль","profile"),("📥Оферы","offers")],
+    return kb([[("👤Мой профиль","profile"),("Oфepы","offers")],
                [("🗞Новости","news"),("🔰Команда","team")],
                [("Обучение 💻","learning")],
                               [("Бесплатный аккаунт ☎","free_accounts")]])
@@ -397,7 +397,7 @@ async def notify_admins(event: str, user_id: int, details: str = ""):
 async def build_admin_keyboard():
     enabled = await admin_logging_enabled()
     label = "🟢 Логирование: ВКЛ" if enabled else "🔴 Логирование: ВЫКЛ"
-    return kb([[("Участники 👥","adm_users")],[("Выдать офер📥","adm_offers")],
+    return kb([[("Участники 👥","adm_users")],[("Выдать oфep📥","adm_offers")],
                [("Заявки 💰","adm_payouts")],[("💸 Заявки на вывод","adm_withdrawals")],[("🕴️Добавить администрацию","adm_add")],
                [("Новости 🗞","adm_news")],
                [("📲 Аккаунты","acc_menu")],[("🔎 Ссылки пользователей","adm_monitor")],
@@ -407,7 +407,7 @@ async def build_admin_keyboard():
 async def offers(c: CallbackQuery):
     items = await db.all("SELECT * FROM offers WHERE active=1 ORDER BY id")
     if not items:
-        await edit_panel(c, "Пока нет доступных офферов.", reply_markup=back_menu())
+        await edit_panel(c, "Пока нет доступных oффepoв.", reply_markup=back_menu())
     else:
         rows = [[(f"{x['title']} - {x['price']:.1f}$",f"offer:{x['id']}")] for x in items]
         rows.append([("Назад ↩️","home")])
@@ -421,7 +421,7 @@ async def offers(c: CallbackQuery):
 async def offer_detail(c: CallbackQuery):
     oid = int(c.data.split(":")[1])
     o = await db.one("SELECT * FROM offers WHERE id=? AND active=1",(oid,))
-    if not o: return await c.answer("Оффер недоступен",show_alert=True)
+    if not o: return await c.answer("Oффep недоступен",show_alert=True)
     await edit_panel(c, f"{o['title']}\nКурс: {o['price']:.1f}$\nМинимально лидов: {o['min_leads']}\nКанал: {o['channel']}\n\nВы точно хотите выбрать этот офер?",
                            reply_markup=kb([[("Да ✅",f"take:{oid}")],[("Назад ↩️","offers")]]))
     await c.answer()
@@ -433,8 +433,8 @@ async def take_link(c: CallbackQuery):
     if current and current["current_link_id"]:
         return await c.answer("У вас уже есть активная ссылка. Обратитесь к администратору для её замены.", show_alert=True)
     link = await db.take_link(c.from_user.id, oid)
-    if not link: return await edit_panel(c, "Свободных ссылок для этого оффера нет. Обратитесь к администратору.")
-    await notify_admins("взял ссылку", c.from_user.id, f"Ссылка #{link['id']} · Оффер ID {oid}")
+    if not link: return await edit_panel(c, "Свободных ссылок для этого oффepa нет. Обратитесь к администратору.")
+    await notify_admins("взял ссылку", c.from_user.id, f"Ссылка #{link['id']} · Oффep ID {oid}")
     await edit_panel(c, f"Вы успешно взяли ссылку!\nВаш номер: {link['id']}\nВаша ссылка: {link['url']}\n\nВы можете посмотреть свою ссылку в профиле в любой момент",
                            reply_markup=kb([[("В меню","home")]]))
     await c.answer()
@@ -611,7 +611,7 @@ async def render_team_stats(c: CallbackQuery, offset: int = 0):
         for link in page:
             owner = member_names.get(link["assigned_user"], str(link["assigned_user"]))
             url = (link["url"] or "")[:100]
-            body += f"\n\n#{link['id']} · {owner} · {link['title'] or 'оффер'} · {link['leads']} лидов\n{url}"
+            body += f"\n\n#{link['id']} · {owner} · {link['title'] or 'oффep'} · {link['leads']} лидов\n{url}"
     else:
         body += "\n\nУ команды пока нет активных или выданных ссылок."
     rows = []
@@ -922,7 +922,7 @@ async def admin_router(c:CallbackQuery,state:FSMContext):
             reply_markup=kb([[('Завезти обычный акк', 'stock_add:ordinary')], [('Завезти премиум акк', 'stock_add:premium')], [('Назад ↩️', 'admin_home')]])
         )
     elif action=="adm_addlinks":
-        await state.set_state(Flow.offer_title); await edit_panel(c, "Для добавления офера укажи его название:")
+        await state.set_state(Flow.offer_title); await edit_panel(c, "Для добавления oфepa укажи его название:")
     elif action=="adm_stats":
         links=await db.all("SELECT * FROM links ORDER BY id")
         await edit_panel(c, "Выберите ссылку:",reply_markup=kb([[(f"{x['id']} ссылка",f"linkstats:{x['id']}")] for x in links]+[[("Назад ↩️","adm_offers")]]))
@@ -1044,7 +1044,7 @@ async def role_down(c:CallbackQuery):
 @dp.message(Flow.offer_title)
 async def offer_title(m:Message,state:FSMContext):
     if not await db.is_admin(m.from_user.id,OWNER_ID): return
-    if not m.text or len(m.text.strip()) > 45: return await m.answer("Название оффера должно быть не длиннее 45 символов.")
+    if not m.text or len(m.text.strip()) > 45: return await m.answer("Название oффepa должно быть не длиннее 45 символов.")
     await state.update_data(offer_title=m.text.strip()); await state.set_state(Flow.offer_min)
     await m.answer("Укажите минимальное число лидов для выплаты:")
 
@@ -1054,7 +1054,7 @@ async def offer_min(m:Message,state:FSMContext):
     try: n=int(m.text); assert n>=1
     except: return await m.answer("Введите целое число больше нуля.")
     await state.update_data(offer_min=n,links=[]); await state.set_state(Flow.offer_channel)
-    await m.answer("Укажите название канала/источника трафика для этого оффера:")
+    await m.answer("Укажите название канала/источника трафика для этого oффepa:")
 
 @dp.message(Flow.offer_channel)
 async def offer_channel(m:Message,state:FSMContext):
@@ -1115,7 +1115,7 @@ async def offer_price(m:Message,state:FSMContext):
             await db.run("INSERT INTO links(offer_id,url) VALUES(?,?)",(oid,url)); added += 1
         except Exception:
             pass
-    await state.clear(); await m.answer(f"Оффер создан. Ссылок добавлено: {added} (дубликаты пропущены).",reply_markup=kb([[("В админ-панель", "admin_home")]]))
+    await state.clear(); await m.answer(f"Oффepa создан. Ссылок добавлено: {added} (дубликаты пропущены).",reply_markup=kb([[("В админ-панель", "admin_home")]]))
 
 @dp.callback_query(F.data.startswith("linkstats:"))
 async def link_stats(c:CallbackQuery):

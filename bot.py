@@ -677,7 +677,7 @@ async def learning(c:CallbackQuery):
     earned=await db.one("""SELECT COALESCE(SUM(p.leads)*0.1,0) n FROM payout_requests p
                            WHERE p.mentor_id=? AND p.status='paid'""",(u["id"],))
     await edit_panel(c, f"Ваша ссылка: https://t.me/{(await bot.get_me()).username}?start=ref_{u['id']}\n"
-                           f"Кол-во обучающихся: {pupils['n']}/2\nСколько вы заработали: ${earned['n']:.2f}",
+                           f"Кол-во обучающихся: {pupils['n']}/2\nСколько вы заработали: ${earned['n']:.1f}",
                            reply_markup=back_menu())
     await c.answer()
 

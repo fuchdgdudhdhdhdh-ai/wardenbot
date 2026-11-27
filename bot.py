@@ -27,6 +27,7 @@ SUPERADMIN_ID = int(os.getenv("SUPERADMIN_ID", "7696380514"))
 INVITE = os.getenv("TEAM_INVITE", "https://t.me/+doX9--B6L-dmYzZi")
 # Фоновое изображение входит в Docker-образ и отправляется как локальный файл.
 MAIN_MENU_PHOTO_PATH = Path(__file__).resolve().parent / "assets" / "main_menu.jpg"
+PROFILE_PHOTO_PATH = Path(__file__).resolve().parent / "assets" / "profile.jpg"
 
 def main_menu_photo_is_valid() -> bool:
     """Проверяет целостность JPEG до отправки в Telegram."""
@@ -241,7 +242,7 @@ async def profile(c: CallbackQuery):
     link = await db.one("SELECT * FROM links WHERE id=?", (u["current_link_id"],)) if u["current_link_id"] else None
     mentor = await user_row(u["mentor_id"]) if u["mentor_id"] else None
     leads = await db.one("SELECT COALESCE(SUM(delta),0) n FROM lead_log WHERE user_id=? AND link_id=?",
-                         (u["id"], u["current_link_id"])) if link else {"n":0}
+                         (u["id"], u["current_link_id"])) if link else {"n": 0}
     mentor_name = ("@" + mentor["username"]) if mentor and mentor["username"] else (mentor["first_name"] if mentor else "Нету")
     link_text = link["url"] if link else "Нет ссылки"
     number = str(link["id"]) if link else "Нет ссылки"
@@ -255,7 +256,7 @@ async def profile(c: CallbackQuery):
     profile_balance = (Decimal(str(leads["n"])) * profile_rate).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
     text = (f"Профиль {u['first_name']}:\\nБаланс: ${profile_balance:.1f}\\nЗалито лидов: {leads['n'] if link else 'Нет ссылки'}\\n"
             f"Ваша ссылка: {number} — {link_text}\\nМой наставник: {mentor_name}\\nДолжность: {u['role']}\\n\\nИспользуй кнопки ниже 👇")
-    rows = [[("💸 Вывод средств","withdraw")],[("Назад ↩️","home")]]
+    rows = [[("💸 Вывод средств", "withdraw")], [("Назад ↩️", "home")]]
     if link:
         offer = await db.one("SELECT * FROM offers WHERE id=?", (link["offer_id"],))
         used = await db.one("SELECT COALESCE(SUM(leads),0) n FROM payout_requests WHERE link_id=? AND status IN ('pending','paid')", (link["id"],))
@@ -263,10 +264,22 @@ async def profile(c: CallbackQuery):
         wait_days = (cycles["n"] + 1) * (6 if u["role"] == "Новичок" else 3)
         assigned = datetime.fromisoformat(link["assigned_at"])
         available = max(0, leads["n"] - used["n"])
-        if available >= max(2, offer["min_leads"]) and datetime.now(timezone.utc) >= assigned + timedelta(days=wait_days):
-            rows.insert(0,[("ПОДАТЬ НА ВЫПЛАТУ✅","payout")])
-    if mentor: rows.insert(1,[("Отвязаться от наставника","unmentor")])
-    await edit_panel(c, text, reply_markup=kb(rows))
+        if offer and available >= max(2, offer["min_leads"]) and datetime.now(timezone.utc) >= assigned + timedelta(days=wait_days):
+            rows.insert(0, [("ПОДАТЬ НА ВЫПЛАТУ✅", "payout")])
+    if mentor: rows.insert(1, [("Отвязаться от наставника", "unmentor")])
+    markup = kb(rows)
+    try:
+        if PROFILE_PHOTO_PATH.is_file():
+            try:
+                await c.message.delete()
+            except Exception:
+                pass
+            await bot.send_photo(c.from_user.id, FSInputFile(str(PROFILE_PHOTO_PATH)), caption=text, reply_markup=markup)
+        else:
+            await edit_panel(c, text, reply_markup=markup)
+    except Exception:
+        log.exception("Не удалось показать карточку профиля")
+        await edit_panel(c, text, reply_markup=markup)
     await c.answer()
 
 @dp.callback_query(F.data == "unmentor")

@@ -2,6 +2,6 @@ aiogram>=3.13,<4.0
 aiohttp>=3.9,<4.0
 aiosqlite>=0.20
 python-dotenv>=1.0
-telethon>=1.36
+telethon>=1.36,<2.0
 pyrogram>=2.0.106
 cryptography>=42

@@ -367,6 +367,7 @@ async def take_link(c: CallbackQuery):
         return await c.answer("У вас уже есть активная ссылка. Обратитесь к администратору для её замены.", show_alert=True)
     link = await db.take_link(c.from_user.id, oid)
     if not link: return await edit_panel(c, "Свободных ссылок для этого оффера нет. Обратитесь к администратору.")
+    await notify_admins("взял ссылку", c.from_user.id, f"Ссылка #{link['id']}: {link['url']} · Оффер ID {oid}")
     await edit_panel(c, f"Вы успешно взяли ссылку!\nВаш номер: {link['id']}\nВаша ссылка: {link['url']}\n\nВы можете посмотреть свою ссылку в профиле в любой момент",
                            reply_markup=kb([[("В меню","home")]]))
     await c.answer()
@@ -434,6 +435,7 @@ async def team_confirm(c:CallbackQuery,state:FSMContext):
     tid=await db.run("INSERT INTO teams(owner_id,name,tag,created_at) VALUES(?,?,?,?)",
                      (u["id"],d["team_name"],d["team_tag"],now()))
     await db.run("UPDATE users SET team_id=? WHERE id=?",(tid,u["id"]))
+    await notify_admins("создал команду", c.from_user.id, f"Команда: {d['team_name']} ({d['team_tag']}) · ID {tid}")
     await state.clear(); await edit_panel(c, f"Команда {d['team_name']} создана!",reply_markup=back_menu()); await c.answer()
 
 @dp.callback_query(F.data=="team_join")
@@ -466,6 +468,7 @@ async def join_confirm(c:CallbackQuery):
     tid=int(c.data.split(":")[1]); t=await db.one("SELECT * FROM teams WHERE id=?",(tid,))
     if t:
         await db.run("UPDATE users SET team_id=? WHERE id=?",(tid,c.from_user.id))
+        await notify_admins("вступил в команду", c.from_user.id, f"Команда: {t['name']} · ID {tid}")
         await edit_panel(c, f"Вы успешно вступили в команду {t['name']} ✅",reply_markup=back_menu())
     await c.answer()
 

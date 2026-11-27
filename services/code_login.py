@@ -99,7 +99,7 @@ class CodeLoginManager:
             (admin_id, phone, api_id, api_hash, sent.phone_code_hash, temp_session,
              _now().isoformat(), (_now() + timedelta(minutes=LOGIN_TTL_MIN)).isoformat()))
         self._clients[login_id] = client
-        return login_id, self.describe(sent.type), sent.timeout or 60
+        return login_id, self.describe(sent.type), sent.timeout or 60, (getattr(sent.type, "length", None) or 5)
 
     async def _persist_temp(self, login_id, client):
         await self.db.run("UPDATE account_logins SET temp_session_enc=? WHERE id=?",
@@ -114,7 +114,7 @@ class CodeLoginManager:
                                  WHERE id=?""",
                               (sent.phone_code_hash, (_now() + timedelta(minutes=LOGIN_TTL_MIN)).isoformat(), login_id))
             await self._persist_temp(login_id, client)
-            return self.describe(sent.type)
+            return self.describe(sent.type), (getattr(sent.type, "length", None) or 5)
 
     async def submit_code(self, login_id, admin_id, code: str):
         async with self._lock(login_id):

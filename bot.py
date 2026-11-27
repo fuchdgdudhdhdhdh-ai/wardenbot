@@ -266,7 +266,13 @@ async def withdraw_start(c: CallbackQuery, state: FSMContext):
         return await c.answer()
     await state.set_state(Flow.withdraw_amount)
     await edit_panel(c, f"Ваш баланс: ${u.get('balance', 0):.1f}. Введите сумму вывода (не больше баланса):",
-                     reply_markup=kb([[("Отмена ↩️","profile")]]))
+                     reply_markup=kb([[("Отмена ↩️","withdraw_cancel")]]))
+    await c.answer()
+
+@dp.callback_query(F.data == "withdraw_cancel")
+async def withdraw_cancel(c: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await edit_panel(c, "Вывод средств отменён.", reply_markup=back_menu())
     await c.answer()
 
 @dp.message(Flow.withdraw_amount)

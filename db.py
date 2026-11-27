@@ -357,7 +357,7 @@ class DB:
             if leads <= used:
                 raise ValueError("Нет новых лидов для выплаты.")
             payable = leads - used
-            amount = round(payable * price, 2)
+            amount = round(payable * price, 1)
             cur = await conn.execute("""INSERT INTO payout_requests(user_id,link_id,leads,price,amount,mentor_id,created_at)
                                         VALUES(?,?,?,?,?,?,?)""", (user_id, link_id, payable, price, amount, mentor_id, now()))
             return cur.lastrowid, payable, amount

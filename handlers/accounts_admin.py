@@ -110,14 +110,14 @@ async def phone_entered(m: Message, state: FSMContext):
         return await m.answer("Нужен номер из 10–15 цифр, например +79991234567.")
     phone = "+" + digits
     try:
-        login_id, note, _timeout = await app.code_login.start(m.from_user.id, phone)
+        login_id, note, _timeout, code_len = await app.code_login.start(m.from_user.id, phone)
     except FloodWaitError as exc:
         return await m.answer(f"Telegram просит подождать {exc.seconds} сек. и повторить.")
     except CodeLoginError as exc:
         return await m.answer(f"Не удалось отправить код: {exc}")
     await state.set_state(AddFlow.code)
-    await state.update_data(login_id=login_id, buf="")
-    await m.answer(f"Код для {phone} отправлен.\n{note}.\n\nВведите код кнопками ниже.",
+    await state.update_data(login_id=login_id, buf="", code_len=code_len)
+    await m.answer(f"Код для {phone} отправлен: {note}. Если код приходит в Telegram, откройте аккаунт, который добавляете, и найдите сообщение от Telegram.\n\nВведите код кнопками ниже.",
                    reply_markup=keypad(""))
 
 
@@ -133,7 +133,8 @@ async def current_login(c, state):
 async def redraw(c, state, text=None, error=None):
     data = await state.get_data()
     buf = data.get("buf", "")
-    body = text or f"Введите код ({len(buf)}/{CODE_LEN}): {' '.join(buf) or '· · · · ·'}"
+    code_len = data.get("code_len", CODE_LEN)
+    body = text or f"Введите код ({len(buf)}/{code_len}): {' '.join(buf) or '· ' * code_len}"
     if error:
         body = f"{error}\n\n{body}"
     await app.edit_panel(c, body, reply_markup=keypad(buf))
@@ -145,8 +146,8 @@ async def submit(c, state):
         return
     data = await state.get_data()
     code = data.get("buf", "")
-    if len(code) < CODE_LEN:
-        return await redraw(c, state, error=f"Код из {CODE_LEN} цифр, введено {len(code)}.")
+    if len(code) < data.get("code_len", CODE_LEN):
+        return await redraw(c, state, error=f"Код из {data.get('code_len', CODE_LEN)} цифр, введено {len(code)}.")
     try:
         acc_id = await app.code_login.submit_code(login_id, c.from_user.id, code)
     except NeedPassword:
@@ -180,12 +181,12 @@ async def code_button(c: CallbackQuery, state: FSMContext):
         return await c.answer()
     if action == "resend":
         try:
-            note = await app.code_login.resend(login_id, c.from_user.id)
+            note, code_len = await app.code_login.resend(login_id, c.from_user.id)
         except FloodWaitError as exc:
             return await c.answer(f"Подождите {exc.seconds} сек.", show_alert=True)
         except (CodeLoginError, LoginNotFound, NotYourLogin) as exc:
             return await c.answer(str(exc), show_alert=True)
-        await state.update_data(buf="")
+        await state.update_data(buf="", code_len=code_len)
         await redraw(c, state, text=f"Код отправлен заново. {note}.")
         return await c.answer("Отправлено")
     data = await state.get_data()
@@ -194,10 +195,10 @@ async def code_button(c: CallbackQuery, state: FSMContext):
         await state.update_data(buf=buf[:-1])
         return await redraw(c, state)
     if action == "d":
-        if len(buf) >= CODE_LEN:
+        if len(buf) >= data.get("code_len", CODE_LEN):
             buf = ""
         await state.update_data(buf=buf + parts[2])
-        if len(buf) + 1 >= CODE_LEN:
+        if len(buf) + 1 >= data.get("code_len", CODE_LEN):
             return await submit(c, state)
         return await redraw(c, state)
     if action == "ok":

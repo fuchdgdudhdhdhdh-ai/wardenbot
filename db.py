@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS accounts(
  created_at TEXT NOT NULL,
  last_used_at TEXT,
  last_check_at TEXT,
- check_failures INTEGER NOT NULL DEFAULT 0
+ check_failures INTEGER NOT NULL DEFAULT 0,
+ session_lost INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_tg_user ON accounts(tg_user_id) WHERE tg_user_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_accounts_pick ON accounts(account_class,status,id);
@@ -195,7 +196,7 @@ class DB:
                 for col in ("admin_id", "mentor_id"):
                     if col not in cols: await db.execute(f"ALTER TABLE payout_requests ADD COLUMN {col} INTEGER")
                 acc_cols = {row[1] for row in await (await db.execute("PRAGMA table_info(accounts)")).fetchall()}
-                migrations = {"account_class":"TEXT NOT NULL DEFAULT 'ordinary'","twofa_enc":"BLOB","twofa_shared":"INTEGER NOT NULL DEFAULT 0","client_type":"TEXT NOT NULL DEFAULT 'telethon'","proxy":"TEXT","note":"TEXT","last_used_at":"TEXT","last_check_at":"TEXT","check_failures":"INTEGER NOT NULL DEFAULT 0"}
+                migrations = {"account_class":"TEXT NOT NULL DEFAULT 'ordinary'","twofa_enc":"BLOB","twofa_shared":"INTEGER NOT NULL DEFAULT 0","client_type":"TEXT NOT NULL DEFAULT 'telethon'","proxy":"TEXT","note":"TEXT","last_used_at":"TEXT","last_check_at":"TEXT","check_failures":"INTEGER NOT NULL DEFAULT 0","session_lost":"INTEGER NOT NULL DEFAULT 0"}
                 for col, ddl in migrations.items():
                     if col not in acc_cols: await db.execute(f"ALTER TABLE accounts ADD COLUMN {col} {ddl}")
                 user_cols = {row[1] for row in await (await db.execute("PRAGMA table_info(users)")).fetchall()}
@@ -215,6 +216,7 @@ class DB:
                 if statement.strip(): await conn.execute(statement)
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS balance DOUBLE PRECISION NOT NULL DEFAULT 0")
             await conn.execute("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS available_for_issue BIGINT NOT NULL DEFAULT 1")
+            await conn.execute("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS session_lost BIGINT NOT NULL DEFAULT 0")
             # Import the existing persistent SQLite file once, before the new database gets populated.
             if os.path.exists(self.path) and await conn.fetchval("SELECT COUNT(*) FROM users") == 0:
                 src = sqlite3.connect(self.path)

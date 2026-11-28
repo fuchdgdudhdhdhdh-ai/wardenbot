@@ -227,8 +227,13 @@ async def password_entered(m: Message, state: FSMContext):
     except (CodeLoginError, LoginNotFound, NotYourLogin, LoginExpired) as exc:
         return await m.answer(f"{exc}\n\nОтправьте пароль ещё раз или нажмите /cancel.")
     await state.clear()
+    # Best-effort removal of the message containing the 2FA secret.
+    try:
+        await m.delete()
+    except Exception:
+        log.warning("Не удалось удалить сообщение с паролем 2FA при добавлении аккаунта #%s", acc_id)
     await app.db.audit(m.from_user.id, "account_added", acc_id, "phone+2fa")
-    await m.answer(f"Аккаунт #{acc_id} залит.",
+    await m.answer(f"Аккаунт #{acc_id} залит. Пароль 2FA сохранён в зашифрованном виде.",
                    reply_markup=app.kb([[("Карточка", f"acc_ls:{acc_id}")], [("К складу", "acc_menu")]]))
 
 

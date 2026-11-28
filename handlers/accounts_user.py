@@ -1,7 +1,7 @@
 """Каталог аккаунтов и панель аренды для участников."""
 import asyncio, logging, re
-from math import ceil
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from html import escape
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
@@ -14,6 +14,7 @@ from services.crypto import decrypt, SessionCryptoError
 log = logging.getLogger(__name__)
 router = Router()
 CLASS_RU = {"ordinary": "❄️ Обычный", "premium": "🌟 Премиум"}
+CARD_CLASS_RU = {"ordinary": "Обычный", "premium": "Премиум"}
 NEED_ROLE = {"ordinary": "Трафер", "premium": "Опытный"}
 
 
@@ -27,7 +28,8 @@ def remaining(iso):
         left = datetime.fromisoformat(iso) - datetime.now(timezone.utc)
     except (TypeError, ValueError):
         return "?"
-    return f"{max(0, int(left.total_seconds() // 60))} мин."
+    hours, minutes = divmod(max(0, int(left.total_seconds() // 60)), 60)
+    return f"{hours} ч. {minutes} мин." if hours else f"{minutes} мин."
 
 
 async def role_ok(user, cls):
@@ -119,25 +121,32 @@ async def lease_guard(c, acc_id):
 
 
 def panel_text(acc):
-    left = app.lease_service.lock_left(acc["leased_at"]) if acc["leased_at"] else 0
-    text = (f"Аккаунт #{acc['id']} · {CLASS_RU[acc['account_class']]}\n"
-            f"Телефон: {acc['phone'] or 'нет'}\n@{acc['tg_username'] or 'нет'}\n"
-            f"Осталось аренды: {remaining(acc['lease_until'])}\n")
-    if left:
-        until = datetime.fromisoformat(acc["leased_at"]) + timedelta(minutes=app.lease_service.lock_min)
-        text += f"🔒 Закреплён за вами до {until:%d.%m %H:%M} UTC (ещё {ceil(left / 60)} ч.), скинуть нельзя\n"
+    """Карточка арендованного аккаунта (HTML: номер в <code> копируется нажатием)."""
+    digits = re.sub(r"\D", "", acc["phone"] or "")
+    phone = f"<code>+{digits}</code>" if digits else "нет"
+    username = f"@{escape(acc['tg_username'])}" if acc["tg_username"] else "нет"
+    if not acc.get("twofa_enc"):
+        twofa = "не указан"
+    elif not acc.get("twofa_shared"):
+        twofa = "скрыт администратором"
     else:
-        text += "🔓 Закрепление истекло — аккаунт можно освободить\n"
-    if acc.get("twofa_shared") and acc.get("twofa_enc"):
         try:
-            twofa_password = decrypt(acc["twofa_enc"])
-            text += "\n\n🚨🚨🚨 ПАРОЛЬ 2FA 🚨🚨🚨\n"
-            text += f"🔐 {twofa_password}\n⚠️ Не передавайте этот пароль другим людям.\n"
-            text += "🚨🚨🚨🚨🚨🚨🚨🚨🚨"
+            twofa = escape(decrypt(acc["twofa_enc"]))
         except SessionCryptoError:
-            text += "\n\n⚠️ 2FA включена, но пароль сейчас недоступен. Обратитесь к администратору."
-    text += "\n\nКоды входа от Telegram будут автоматически отправляться сюда в личные сообщения."
-    return text
+            twofa = "недоступен, обратитесь к администратору"
+    return (f"Аккаунт #{acc['id']}:\n"
+            "📊\n"
+            f"Тип: {CARD_CLASS_RU[acc['account_class']]}\n"
+            f"☎Номер телефона: {phone}\n"
+            "💻\n"
+            f"Юзернейм: {username}\n"
+            "🔐\n"
+            f"2FA: {twofa}\n"
+            "⏰\n"
+            f"Аренда: осталось {remaining(acc['lease_until'])}\n"
+            "\n"
+            "⚠️\n"
+            "Коды телеграм будут автоматически приходить в этот чат")
 
 
 def panel_kb(acc_id):
@@ -152,7 +161,7 @@ async def panel_edit(c, acc_id, user_id):
     if not acc:
         await c.message.answer("Аккаунт вам не принадлежит.")
         return
-    await app.edit_panel(c, panel_text(acc), reply_markup=panel_kb(acc_id))
+    await app.edit_panel(c, panel_text(acc), reply_markup=panel_kb(acc_id), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("uacc_panel:"))

@@ -38,8 +38,8 @@ class LeaseService:
         await self.db.run("INSERT INTO account_events(account_id,user_id,action,detail,created_at) VALUES(?,?,?,?,?)",
                           (acc_id, user_id, action, detail, _stamp(utcnow())))
 
-    async def take_for_class(self, acc_id: int, user_id: int, account_class: str, ttl_min: int = None):
-        now = utcnow(); until = now + timedelta(minutes=ttl_min or self.ttl_min)
+    async def take_for_class(self, acc_id: int, user_id: int, account_class: str):
+        now = utcnow(); until = now + timedelta(minutes=self.ttl_min)
         token = secrets.token_urlsafe(32)
         async def op(conn):
             cur = await conn.execute("SELECT * FROM accounts WHERE id=?", (acc_id,))
@@ -79,8 +79,8 @@ class LeaseService:
         await self._event(acc_id, user_id, "take")
         return value
 
-    async def take(self, acc_id: int, user_id: int, ttl_min: int = 30) -> str:
-        now = utcnow(); until = now + timedelta(minutes=ttl_min)
+    async def take(self, acc_id: int, user_id: int) -> str:
+        now = utcnow(); until = now + timedelta(minutes=self.ttl_min)
         token = secrets.token_urlsafe(32)
         async def op(conn):
             cur = await conn.execute(

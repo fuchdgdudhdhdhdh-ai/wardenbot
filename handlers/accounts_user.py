@@ -129,8 +129,8 @@ def panel_text(acc):
     else:
         text += "🔓 Закрепление истекло — аккаунт можно освободить\n"
     if acc["session_lost"]:
-        text += "⚠️ Серверная сессия потеряна, зайдите заново по коду\n"
-    text += "\nВход: «🔑 Код входа» → введите номер на своём устройстве → код придёт сюда."
+        text += "⚠️ Серверная сессия потеряна, обратитесь к администратору для восстановления входа\n"
+    text += "\nКоды входа от Telegram будут автоматически отправляться сюда в личные сообщения."
     if acc["note"]:
         text += f"\n\nЗаметка: {acc['note'][:300]}"
     return text
@@ -138,7 +138,6 @@ def panel_text(acc):
 
 def panel_kb(acc_id):
     return app.kb([
-        [("🔑 Код входа", f"uacc_code:{acc_id}")],
         [("⏱ Продлить", f"uacc_ext:{acc_id}")],
         [("🚪 Освободить", f"uacc_rel:{acc_id}")],
         [("Назад ↩️", "free_accounts")],
@@ -191,139 +190,3 @@ async def release(c: CallbackQuery, state: FSMContext):
     await app.db.audit(c.from_user.id, "account_released", acc_id)
     await app.edit_panel(c, "Аккаунт освобождён.", reply_markup=app.kb([[("К каталогу", "free_accounts")]]))
     await c.answer()
-
-
-@router.callback_query(F.data.startswith("uacc_code:"))
-async def login_code(c: CallbackQuery):
-    acc_id = int(c.data.split(":")[1])
-    if app.LOGIN_MODE != "code_login":
-        return await c.answer("Выдача кода отключена: нужен ACCOUNT_LOGIN_MODE=code_login", show_alert=True)
-    if not await lease_guard(c, acc_id):
-        return
-    acc = await app.db.one("SELECT * FROM accounts WHERE id=?", (acc_id,))
-    if not acc or not acc["phone"]:
-        return await c.answer("У аккаунта нет номера", show_alert=True)
-    if acc["twofa_enc"] and not acc["twofa_shared"]:
-        return await c.answer("Пароль 2FA у администрации — попросите его у админа.", show_alert=True)
-    await c.answer("Проверяю сессию и запрашиваю код…")
-    try:
-        client = await app.client_pool_service.get(acc_id)
-        await client.get_me()
-    except Exception as exc:
-        await app.db.run("UPDATE accounts SET session_lost=1 WHERE id=?", (acc_id,))
-        await app.alert_session_lost(acc_id, c.from_user.id)
-        return await c.message.answer(f"Серверная сессия не отвечает ({exc}). Администрация увидит потерю, попробуйте позже.",
-                                      reply_markup=app.kb([[("В панель", f"uacc_panel:{acc_id}")]]))
-    # Снимок последнего сообщения делаем ДО запроса: Telegram может прислать код мгновенно.
-    # Чтение сервисного чата тоже требует действующей авторизации: get_me() не всегда
-    # обнаруживает отозванный auth key (Telethon может упасть только на GetUsersRequest).
-    try:
-        last_service_message_id = await latest_service_message_id(client)
-    except Exception as exc:
-        log.warning("Сессия аккаунта #%s недействительна при чтении сервисного чата: %s",
-                    acc_id, exc, exc_info=True)
-        await app.db.run("UPDATE accounts SET session_lost=1 WHERE id=?", (acc_id,))
-        try:
-            await app.client_pool_service.disconnect(acc_id)
-        except Exception:
-            log.exception("Не удалось отключить недействительную сессию #%s", acc_id)
-        try:
-            await app.alert_session_lost(acc_id, c.from_user.id)
-        except Exception:
-            log.exception("Не удалось уведомить о потере сессии #%s", acc_id)
-        return await c.message.answer(
-            "Серверная сессия аккаунта недействительна (ключ авторизации отозван Telegram). "
-            "Аккаунт отмечен как потерявший сессию, администрация уведомлена. "
-            "Попросите администратора восстановить серверный вход.",
-            reply_markup=app.kb([[("В панель", f"uacc_panel:{acc_id}")]])
-        )
-    request_error = None
-    try:
-        if hasattr(client, "send_code_request"):
-            await client.send_code_request(acc["phone"])
-        elif hasattr(client, "send_code"):
-            await client.send_code(acc["phone"])
-        else:
-            raise RuntimeError(f"Неподдерживаемый клиент авторизации: {type(client).__name__}")
-    except FloodWaitError as exc:
-        return await c.message.answer(f"Telegram просит подождать {exc.seconds} сек.")
-    except Exception as exc:
-        # RPC мог выполниться, а ответ потеряться; всё равно проверяем сервисный чат.
-        request_error = exc
-        log.warning("Ошибка при запросе кода для аккаунта #%s: %s", acc_id, exc, exc_info=True)
-    code = await wait_code(client, after_id=last_service_message_id)
-    if code:
-        body = f"Код входа для #{acc_id}: {code}"
-    elif request_error:
-        body = (f"Telegram не подтвердил запрос кода: {request_error}. "
-                "Если запрос уже появился на устройстве, проверьте сообщения Telegram; "
-                "иначе попробуйте ещё раз через минуту.")
-    else:
-        body = "Запрос отправлен, но код не появился в сервисных сообщениях за 30 секунд. Проверьте Telegram на устройстве."
-    if acc["twofa_enc"] and acc["twofa_shared"]:
-        try:
-            body += f"\nПароль 2FA: {decrypt(acc['twofa_enc'])}"
-        except SessionCryptoError:
-            body += "\nПароль 2FA сохранён, но не расшифровывается."
-    body += "\n\nНе нажимайте «Завершить все другие сессии» — так аккаунт останется в складе."
-    await c.message.answer(body, reply_markup=app.kb([[("В панель", f"uacc_panel:{acc_id}")]]))
-    asyncio.create_task(watch_after_login(acc_id, c.from_user.id))
-
-
-async def watch_after_login(acc_id, user_id):
-    """Три минуты после выдачи кода следим, что серверную сессию не скинули."""
-    for _ in range(4):
-        await asyncio.sleep(45)
-        try:
-            client = await app.client_pool_service.get(acc_id)
-            alive = bool(await client.get_me())
-        except Exception:
-            alive = False
-        if alive:
-            await app.db.run("UPDATE accounts SET session_lost=0,last_check_at=? WHERE id=?",
-                             (app.now(), acc_id))
-            continue
-        await app.db.run("UPDATE accounts SET session_lost=1 WHERE id=?", (acc_id,))
-        await app.client_pool_service.disconnect(acc_id)
-        await app.db.run("INSERT INTO account_events(account_id,user_id,action,detail,created_at) VALUES(?,?,?,?,?)",
-                         (acc_id, user_id, "session_lost", "сессия скинута после выдачи кода", app.now()))
-        try:
-            await app.alert_session_lost(acc_id, user_id)
-        except Exception:
-            log.exception("Не удалось уведомить о потере серверной сессии")
-        return
-
-
-async def latest_service_message_id(client):
-    """ID последнего сообщения Telegram до отправки запроса кода."""
-    if hasattr(client, "iter_messages"):
-        recent = await client.get_messages(777000, limit=1)
-        return recent[0].id if recent else 0
-    recent = []
-    async for message in client.get_chat_history(777000, limit=1):
-        recent.append(message)
-    return recent[0].id if recent else 0
-
-
-async def wait_code(client, after_id=0):
-    """Wait for a new Telegram service message newer than the pre-request snapshot."""
-    is_telethon = hasattr(client, "iter_messages")
-    for _ in range(15):
-        await asyncio.sleep(2)
-        try:
-            if is_telethon:
-                messages = await client.get_messages(777000, limit=10, min_id=after_id)
-            else:
-                messages = []
-                async for message in client.get_chat_history(777000, limit=10):
-                    if message.id > after_id:
-                        messages.append(message)
-        except Exception:
-            log.exception("Не удалось прочитать сервисный чат Telegram")
-            continue
-        for msg in messages:
-            message_text = getattr(msg, "message", None) or getattr(msg, "text", None) or ""
-            found = re.search(r"(?<!\\d)(\\d{5,6})(?!\\d)", message_text)
-            if found:
-                return found.group(1)
-    return None

@@ -139,6 +139,21 @@ class LeaseService:
         await self._event(acc_id, admin_id, "force_release")
         await self.pool.disconnect(acc_id)
 
+    async def enforce_fixed_ttl(self):
+        """Shorten any pre-existing lease that exceeds the fixed 15-hour term."""
+        rows = await self.db.all(
+            "SELECT id,leased_at,lease_until FROM accounts WHERE status='leased' AND leased_at IS NOT NULL AND lease_until IS NOT NULL"
+        )
+        for row in rows:
+            try:
+                cap = datetime.fromisoformat(row["leased_at"]) + timedelta(minutes=self.ttl_min)
+                current = datetime.fromisoformat(row["lease_until"])
+            except (TypeError, ValueError):
+                continue
+            if current > cap:
+                await self.db.run("UPDATE accounts SET lease_until=? WHERE id=? AND status='leased'",
+                                  (_stamp(cap), row["id"]))
+
     async def sweep_expired(self):
         now = _stamp(utcnow())
         async def op(conn):
@@ -191,6 +206,7 @@ class LeaseService:
         tick = 0
         while not stop_event.is_set():
             try:
+                await self.enforce_fixed_ttl()
                 await self.sweep_expired()
                 if tick % 5 == 0:
                     await self.check_leased_sessions()

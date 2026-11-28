@@ -11,7 +11,7 @@ class NotYourAccount(RuntimeError): pass
 class LeaseExpired(RuntimeError): pass
 class LeaseLocked(RuntimeError): pass
 
-LOCK_DEFAULT_MIN = 1200
+LOCK_DEFAULT_MIN = 900
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -20,7 +20,7 @@ def _stamp(dt):
     return dt.isoformat()
 
 class LeaseService:
-    def __init__(self, db, client_pool, ttl_min=1200, lock_min=LOCK_DEFAULT_MIN, notify=None):
+    def __init__(self, db, client_pool, ttl_min=900, lock_min=LOCK_DEFAULT_MIN, notify=None):
         self.db, self.pool = db, client_pool
         self.ttl_min, self.lock_min, self.notify = ttl_min, lock_min, notify
 
@@ -38,8 +38,8 @@ class LeaseService:
         await self.db.run("INSERT INTO account_events(account_id,user_id,action,detail,created_at) VALUES(?,?,?,?,?)",
                           (acc_id, user_id, action, detail, _stamp(utcnow())))
 
-    async def take_for_class(self, acc_id: int, user_id: int, account_class: str, ttl_min: int = None):
-        now = utcnow(); until = now + timedelta(minutes=ttl_min or self.ttl_min)
+    async def take_for_class(self, acc_id: int, user_id: int, account_class: str):
+        now = utcnow(); until = now + timedelta(minutes=self.ttl_min)
         token = secrets.token_urlsafe(32)
         async def op(conn):
             cur = await conn.execute("SELECT * FROM accounts WHERE id=?", (acc_id,))
@@ -79,8 +79,8 @@ class LeaseService:
         await self._event(acc_id, user_id, "take")
         return value
 
-    async def take(self, acc_id: int, user_id: int, ttl_min: int = 30) -> str:
-        now = utcnow(); until = now + timedelta(minutes=ttl_min)
+    async def take(self, acc_id: int, user_id: int) -> str:
+        now = utcnow(); until = now + timedelta(minutes=self.ttl_min)
         token = secrets.token_urlsafe(32)
         async def op(conn):
             cur = await conn.execute(
@@ -105,19 +105,7 @@ class LeaseService:
                 raise LeaseExpired("Срок аренды истёк. Возьмите аккаунт повторно.")
         except ValueError as exc:
             raise LeaseExpired("Срок аренды некорректен. Обратитесь к администратору.") from exc
-        await self.renew(acc_id, user_id)
         return row
-
-    async def renew(self, acc_id, user_id, ttl_min=None):
-        now = utcnow(); until = now + timedelta(minutes=ttl_min or self.ttl_min)
-        async def op(conn):
-            cur = await conn.execute(
-                """UPDATE accounts SET lease_until=? WHERE id=? AND status='leased'
-                   AND leased_by=? AND lease_until>? RETURNING id""",
-                (_stamp(until), acc_id, user_id, _stamp(now)))
-            return await cur.fetchone()
-        if await self.db.transaction(op) is None:
-            raise LeaseExpired("Аккаунт занят или срок аренды истёк.")
 
     async def release(self, acc_id: int, user_id: int) -> None:
         row = await self.db.one("SELECT leased_by,leased_at FROM accounts WHERE id=?", (acc_id,))
@@ -150,6 +138,21 @@ class LeaseService:
             raise NotYourAccount("Аккаунт сейчас не арендован.")
         await self._event(acc_id, admin_id, "force_release")
         await self.pool.disconnect(acc_id)
+
+    async def enforce_fixed_ttl(self):
+        """Shorten any pre-existing lease that exceeds the fixed 15-hour term."""
+        rows = await self.db.all(
+            "SELECT id,leased_at,lease_until FROM accounts WHERE status='leased' AND leased_at IS NOT NULL AND lease_until IS NOT NULL"
+        )
+        for row in rows:
+            try:
+                cap = datetime.fromisoformat(row["leased_at"]) + timedelta(minutes=self.ttl_min)
+                current = datetime.fromisoformat(row["lease_until"])
+            except (TypeError, ValueError):
+                continue
+            if current > cap:
+                await self.db.run("UPDATE accounts SET lease_until=? WHERE id=? AND status='leased'",
+                                  (_stamp(cap), row["id"]))
 
     async def sweep_expired(self):
         now = _stamp(utcnow())
@@ -203,6 +206,7 @@ class LeaseService:
         tick = 0
         while not stop_event.is_set():
             try:
+                await self.enforce_fixed_ttl()
                 await self.sweep_expired()
                 if tick % 5 == 0:
                     await self.check_leased_sessions()
@@ -216,7 +220,7 @@ class LeaseService:
 
 lease_service = None
 
-def configure(db, client_pool, ttl_min=1200, lock_min=LOCK_DEFAULT_MIN, notify=None):
+def configure(db, client_pool, ttl_min=900, lock_min=LOCK_DEFAULT_MIN, notify=None):
     global lease_service
     lease_service = LeaseService(db, client_pool, ttl_min, lock_min, notify)
     return lease_service

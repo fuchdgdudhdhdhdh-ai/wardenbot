@@ -113,7 +113,7 @@ async def monitor_login_codes(stop_event):
                     await _scan_account(acc_id, renter_id, cursors)
                 except Exception as exc:
                     message = str(exc).lower()
-                    if "auth key" in message and ("not registered" in message or "unregistered" in message):
+                    if "not registered in the system" in message or "authkeyunregistered" in message:
                         log.warning("Telegram auth key revoked for monitored account #%s", acc_id)
                         changed = await app.db.one(
                             "UPDATE accounts SET session_lost=1 WHERE id=? AND session_lost=0 RETURNING id",

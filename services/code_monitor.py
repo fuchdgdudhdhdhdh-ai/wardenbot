@@ -8,7 +8,7 @@ import bot as app
 
 log = logging.getLogger(__name__)
 SERVICE_CHAT_ID = 777000
-CODE_RE = re.compile(r"(?:login\\s+code|код\\s+входа|код|code)\\D{0,35}(\\d{5,6})", re.IGNORECASE)
+CODE_RE = re.compile(r"(?:login\s+code|код\s+входа|код|code)\D{0,35}(\d{5,6})", re.IGNORECASE)
 
 
 def _message_text(message):
@@ -67,7 +67,7 @@ async def _deliver(acc_id, renter_id, code):
         return
     await app.bot.send_message(
         renter_id,
-        f"🔐 Код входа для аккаунта #{acc_id}: <code>{code}</code>\\n"
+        f"🔐 Код входа для аккаунта #{acc_id}: <code>{code}</code>\n"
         "Используйте его только для входа в этот аккаунт. Не пересылайте код другим людям.",
         parse_mode="HTML",
     )

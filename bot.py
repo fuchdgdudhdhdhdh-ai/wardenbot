@@ -54,8 +54,8 @@ code_monitor_stop = None
 code_monitor_task = None
 ACCOUNTS_READY = False
 LOGIN_MODE = os.getenv("ACCOUNT_LOGIN_MODE", "bot_only").strip().lower()
-ACCOUNT_LEASE_MIN = min(1200, int(os.getenv("ACCOUNT_LEASE_MIN", os.getenv("ACCOUNT_LEASE_TTL_MIN", "1200"))))
-ACCOUNT_LOCK_MIN = min(1200, int(os.getenv("ACCOUNT_LOCK_MIN", "1200")))
+ACCOUNT_LEASE_MIN = min(900, int(os.getenv("ACCOUNT_LEASE_MIN", os.getenv("ACCOUNT_LEASE_TTL_MIN", "900"))))
+ACCOUNT_LOCK_MIN = min(900, int(os.getenv("ACCOUNT_LOCK_MIN", "900")) )
 
 ROLES = ["Новичок", "Трафер", "Опытный", "Наставник"]
 

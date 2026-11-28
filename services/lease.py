@@ -11,7 +11,7 @@ class NotYourAccount(RuntimeError): pass
 class LeaseExpired(RuntimeError): pass
 class LeaseLocked(RuntimeError): pass
 
-LOCK_DEFAULT_MIN = 1200
+LOCK_DEFAULT_MIN = 900
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -20,7 +20,7 @@ def _stamp(dt):
     return dt.isoformat()
 
 class LeaseService:
-    def __init__(self, db, client_pool, ttl_min=1200, lock_min=LOCK_DEFAULT_MIN, notify=None):
+    def __init__(self, db, client_pool, ttl_min=900, lock_min=LOCK_DEFAULT_MIN, notify=None):
         self.db, self.pool = db, client_pool
         self.ttl_min, self.lock_min, self.notify = ttl_min, lock_min, notify
 
@@ -105,19 +105,7 @@ class LeaseService:
                 raise LeaseExpired("Срок аренды истёк. Возьмите аккаунт повторно.")
         except ValueError as exc:
             raise LeaseExpired("Срок аренды некорректен. Обратитесь к администратору.") from exc
-        await self.renew(acc_id, user_id)
         return row
-
-    async def renew(self, acc_id, user_id, ttl_min=None):
-        now = utcnow(); until = now + timedelta(minutes=ttl_min or self.ttl_min)
-        async def op(conn):
-            cur = await conn.execute(
-                """UPDATE accounts SET lease_until=? WHERE id=? AND status='leased'
-                   AND leased_by=? AND lease_until>? RETURNING id""",
-                (_stamp(until), acc_id, user_id, _stamp(now)))
-            return await cur.fetchone()
-        if await self.db.transaction(op) is None:
-            raise LeaseExpired("Аккаунт занят или срок аренды истёк.")
 
     async def release(self, acc_id: int, user_id: int) -> None:
         row = await self.db.one("SELECT leased_by,leased_at FROM accounts WHERE id=?", (acc_id,))
@@ -216,7 +204,7 @@ class LeaseService:
 
 lease_service = None
 
-def configure(db, client_pool, ttl_min=1200, lock_min=LOCK_DEFAULT_MIN, notify=None):
+def configure(db, client_pool, ttl_min=900, lock_min=LOCK_DEFAULT_MIN, notify=None):
     global lease_service
     lease_service = LeaseService(db, client_pool, ttl_min, lock_min, notify)
     return lease_service

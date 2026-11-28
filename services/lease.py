@@ -1,5 +1,6 @@
 """Атомарная аренда аккаунтов и контроль срока действия."""
 import asyncio, secrets, logging
+from math import ceil
 from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger(__name__)
@@ -8,6 +9,9 @@ class AccountLimit(RuntimeError): pass
 class AccountUnavailable(RuntimeError): pass
 class NotYourAccount(RuntimeError): pass
 class LeaseExpired(RuntimeError): pass
+class LeaseLocked(RuntimeError): pass
+
+LOCK_DEFAULT_MIN = 1440
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -16,8 +20,19 @@ def _stamp(dt):
     return dt.isoformat()
 
 class LeaseService:
-    def __init__(self, db, client_pool, ttl_min=30):
-        self.db, self.pool, self.ttl_min = db, client_pool, ttl_min
+    def __init__(self, db, client_pool, ttl_min=1440, lock_min=LOCK_DEFAULT_MIN, notify=None):
+        self.db, self.pool = db, client_pool
+        self.ttl_min, self.lock_min, self.notify = ttl_min, lock_min, notify
+
+    def lock_left(self, leased_at) -> int:
+        """Минуты до конца защитного окна; 0 — освобождать уже можно."""
+        if not self.lock_min or not leased_at:
+            return 0
+        try:
+            until = datetime.fromisoformat(leased_at) + timedelta(minutes=self.lock_min)
+        except (TypeError, ValueError):
+            return 0
+        return max(0, int((until - utcnow()).total_seconds() // 60))
 
     async def _event(self, acc_id, user_id, action, detail=None):
         await self.db.run("INSERT INTO account_events(account_id,user_id,action,detail,created_at) VALUES(?,?,?,?,?)",
@@ -105,10 +120,18 @@ class LeaseService:
             raise LeaseExpired("Аккаунт занят или срок аренды истёк.")
 
     async def release(self, acc_id: int, user_id: int) -> None:
+        row = await self.db.one("SELECT leased_by,leased_at FROM accounts WHERE id=?", (acc_id,))
+        if not row or row["leased_by"] != user_id:
+            raise NotYourAccount("Это не ваш аккаунт.")
+        left = self.lock_left(row["leased_at"])
+        if left:
+            until = datetime.fromisoformat(row["leased_at"]) + timedelta(minutes=self.lock_min)
+            raise LeaseLocked(f"Аккаунт закреплён за вами до {until:%d.%m %H:%M}. "
+                              f"Освободить можно через {ceil(left / 60)} ч.")
         async def op(conn):
             cur = await conn.execute(
                 """UPDATE accounts SET status='free',leased_by=NULL,lease_token=NULL,
-                   leased_at=NULL,lease_until=NULL WHERE id=? AND leased_by=? RETURNING id""",
+                   leased_at=NULL,lease_until=NULL,session_lost=0 WHERE id=? AND leased_by=? RETURNING id""",
                 (acc_id, user_id))
             return await cur.fetchone()
         if await self.db.transaction(op) is None:
@@ -144,12 +167,48 @@ class LeaseService:
             await self.pool.disconnect(acc_id)
             await self._event(acc_id, None, "release", "Автоматическое освобождение по TTL")
 
+    async def verify_session(self, acc_id) -> bool:
+        try:
+            client = await self.pool.get(acc_id)
+            return bool(await client.get_me())
+        except Exception:
+            return False
+
+    async def check_leased_sessions(self):
+        """Пока идёт окно закрепления — убеждаемся, что серверную сессию не скинули."""
+        if not self.lock_min:
+            return
+        rows = await self.db.all(
+            "SELECT id,leased_by,leased_at,session_lost FROM accounts WHERE status='leased'")
+        for row in rows:
+            if self.lock_left(row["leased_at"]) <= 0:
+                continue
+            if await self.verify_session(row["id"]):
+                await self.db.run("UPDATE accounts SET last_check_at=?,check_failures=0,session_lost=0 WHERE id=?",
+                                  (_stamp(utcnow()), row["id"]))
+                continue
+            await self.pool.disconnect(row["id"])
+            await self.db.run("UPDATE accounts SET session_lost=1,last_check_at=? WHERE id=?",
+                              (_stamp(utcnow()), row["id"]))
+            if row["session_lost"]:
+                continue
+            await self._event(row["id"], row["leased_by"], "session_lost", "Серверная сессия не отвечает")
+            if self.notify:
+                try:
+                    await self.notify(row["id"], row["leased_by"])
+                except Exception:
+                    log.exception("Не удалось уведомить о потере сессии аккаунта %s", row["id"])
+
     async def scheduler(self, stop_event):
+        tick = 0
         while not stop_event.is_set():
             try:
                 await self.sweep_expired()
+                if tick % 5 == 0:
+                    await self.check_leased_sessions()
             except Exception:
-                log.exception("Ошибка очистки просроченных аренд")
+                log.exception("Ошибка обслуживания аренд")
+            tick += 1
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=60)
             except asyncio.TimeoutError:
@@ -157,7 +216,7 @@ class LeaseService:
 
 lease_service = None
 
-def configure(db, client_pool, ttl_min=30):
+def configure(db, client_pool, ttl_min=1440, lock_min=LOCK_DEFAULT_MIN, notify=None):
     global lease_service
-    lease_service = LeaseService(db, client_pool, ttl_min)
+    lease_service = LeaseService(db, client_pool, ttl_min, lock_min, notify)
     return lease_service

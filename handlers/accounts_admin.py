@@ -294,7 +294,8 @@ async def card(acc_id):
     text = (f"Аккаунт #{acc['id']}\nМетка: {acc['label']}\nКласс: {acc['account_class']}\n"
             f"Статус: {STATUS_RU.get(acc['status'], acc['status'])}\nТелефон: {mask(acc['phone'])}\n"
             f"@{acc['tg_username'] or 'нет'}\ntg_user_id: {acc['tg_user_id'] or 'нет'}\n"
-            f"Тип клиента: {acc['client_type']}\n2FA в базе: {'да' if acc['twofa_enc'] else 'нет'}, "
+            f"Тип клиента: {acc['client_type']}\nСессия на сервере: {'потеряна ⚠️' if acc['session_lost'] else 'ок'}\n"
+            f"2FA в базе: {'да' if acc['twofa_enc'] else 'нет'}, "
             f"выдаётся: {'да' if acc['twofa_shared'] else 'нет'}{lease}")
     buttons = [
         [("🏷 Метка", f"acc_lbl:{acc_id}"), ("📝 Заметка", f"acc_note:{acc_id}")],
@@ -451,7 +452,7 @@ async def check(c: CallbackQuery):
         me = await client.get_me()
         if not me:
             raise RuntimeError("Telegram не вернул профиль")
-        await app.db.run("UPDATE accounts SET last_check_at=?,check_failures=0,tg_username=? WHERE id=?",
+        await app.db.run("UPDATE accounts SET last_check_at=?,check_failures=0,tg_username=?,session_lost=0 WHERE id=?",
                          (app.now(), getattr(me, "username", None), acc_id))
         await app.db.run("INSERT INTO account_events(account_id,user_id,action,created_at) VALUES(?,?,?,?)",
                          (acc_id, c.from_user.id, "check_ok", app.now()))

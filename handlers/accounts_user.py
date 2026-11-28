@@ -1,25 +1,20 @@
 """Каталог аккаунтов и панель аренды для участников."""
 import asyncio, logging, re
-from datetime import datetime, timezone
+from math import ceil
+from datetime import datetime, timedelta, timezone
 from aiogram import Router, F
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery
 from telethon.errors import FloodWaitError
 import bot as app
-from services.lease import AccountBusy, AccountLimit, AccountUnavailable, NotYourAccount, LeaseExpired
+from services.lease import (AccountBusy, AccountLimit, AccountUnavailable, NotYourAccount,
+                            LeaseExpired, LeaseLocked)
 from services.crypto import decrypt, SessionCryptoError
 
 log = logging.getLogger(__name__)
 router = Router()
 CLASS_RU = {"ordinary": "❄️ Обычный", "premium": "🌟 Премиум"}
 NEED_ROLE = {"ordinary": "Трафер", "premium": "Опытный"}
-
-
-class LeaseFlow(StatesGroup):
-    send_target = State()
-    send_text = State()
-    join_link = State()
 
 
 def mask(phone):
@@ -124,10 +119,18 @@ async def lease_guard(c, acc_id):
 
 
 def panel_text(acc):
+    left = app.lease_service.lock_left(acc["leased_at"]) if acc["leased_at"] else 0
     text = (f"Аккаунт #{acc['id']} · {CLASS_RU[acc['account_class']]}\n"
             f"Телефон: {acc['phone'] or 'нет'}\n@{acc['tg_username'] or 'нет'}\n"
-            f"Осталось аренды: {remaining(acc['lease_until'])}\n\n"
-            "Сессия хранится на сервере: session-строку и api_id/api_hash не показываем.")
+            f"Осталось аренды: {remaining(acc['lease_until'])}\n")
+    if left:
+        until = datetime.fromisoformat(acc["leased_at"]) + timedelta(minutes=app.lease_service.lock_min)
+        text += f"🔒 Закреплён за вами до {until:%d.%m %H:%M} (ещё {ceil(left / 60)} ч.), скинуть нельзя\n"
+    else:
+        text += "🔓 Закрепление истекло — аккаунт можно освободить\n"
+    if acc["session_lost"]:
+        text += "⚠️ Серверная сессия потеряна, зайдите заново по коду\n"
+    text += "\nВход: «🔑 Код входа» → введите номер на своём устройстве → код придёт сюда."
     if acc["note"]:
         text += f"\n\nЗаметка: {acc['note'][:300]}"
     return text
@@ -135,9 +138,9 @@ def panel_text(acc):
 
 def panel_kb(acc_id):
     return app.kb([
-        [("✉️ Написать", f"uacc_send:{acc_id}"), ("📥 Входящие", f"uacc_inbox:{acc_id}")],
-        [("➕ Вступить по ссылке", f"uacc_join:{acc_id}"), ("🔑 Код входа", f"uacc_code:{acc_id}")],
-        [("⏱ Продлить", f"uacc_ext:{acc_id}"), ("🚪 Освободить", f"uacc_rel:{acc_id}")],
+        [("🔑 Код входа", f"uacc_code:{acc_id}")],
+        [("⏱ Продлить", f"uacc_ext:{acc_id}")],
+        [("🚪 Освободить", f"uacc_rel:{acc_id}")],
         [("Назад ↩️", "free_accounts")],
     ])
 
@@ -181,6 +184,8 @@ async def release(c: CallbackQuery, state: FSMContext):
     await state.clear()
     try:
         await app.lease_service.release(acc_id, c.from_user.id)
+    except LeaseLocked as exc:
+        return await c.answer(str(exc), show_alert=True)
     except NotYourAccount as exc:
         return await c.answer(str(exc), show_alert=True)
     await app.db.audit(c.from_user.id, "account_released", acc_id)
@@ -188,131 +193,28 @@ async def release(c: CallbackQuery, state: FSMContext):
     await c.answer()
 
 
-@router.callback_query(F.data.startswith("uacc_send:"))
-async def send_start(c: CallbackQuery, state: FSMContext):
-    acc_id = int(c.data.split(":")[1])
-    if not await lease_guard(c, acc_id):
-        return
-    await state.set_state(LeaseFlow.send_target)
-    await state.update_data(acc_id=acc_id)
-    await app.edit_panel(c, "Кому написать? Пришлите @username или числовой id.")
-    await c.answer()
-
-
-@router.message(LeaseFlow.send_target)
-async def send_target(m: Message, state: FSMContext):
-    target = (m.text or "").strip()
-    if not target:
-        return await m.answer("Пришлите @username или id.")
-    await state.update_data(target=target)
-    await state.set_state(LeaseFlow.send_text)
-    await m.answer("Текст сообщения:")
-
-
-@router.message(LeaseFlow.send_text)
-async def send_text(m: Message, state: FSMContext):
-    data = await state.get_data()
-    acc_id, target = data["acc_id"], data["target"]
-    await state.clear()
-    try:
-        await app.lease_service.guard_lease(acc_id, m.from_user.id)
-        client = await app.client_pool_service.get(acc_id)
-        entity = int(target) if target.lstrip("-").isdigit() else target
-        await client.send_message(entity, m.text or "")
-    except (NotYourAccount, LeaseExpired, AccountUnavailable) as exc:
-        return await m.answer(f"Не отправлено: {exc}")
-    except Exception as exc:
-        return await m.answer(f"Не отправлено: {exc}")
-    await app.db.run("UPDATE accounts SET last_used_at=? WHERE id=?", (app.now(), acc_id))
-    await m.answer("Отправлено.", reply_markup=app.kb([[("В панель", f"uacc_panel:{acc_id}")]]))
-
-
-@router.callback_query(F.data.startswith("uacc_inbox:"))
-async def inbox(c: CallbackQuery):
-    acc_id = int(c.data.split(":")[1])
-    if not await lease_guard(c, acc_id):
-        return
-    await c.answer("Загружаю…")
-    try:
-        client = await app.client_pool_service.get(acc_id)
-        dialogs = []
-        if hasattr(client, "iter_dialogs"):
-            async for dialog in client.iter_dialogs(limit=10):
-                dialogs.append(dialog)
-        else:
-            async for dialog in client.get_dialogs(limit=10):
-                dialogs.append(dialog)
-    except Exception as exc:
-        return await c.message.answer(f"Не удалось получить диалоги: {exc}")
-    if not dialogs:
-        return await c.message.answer("Диалогов нет.")
-    lines = []
-    for d in dialogs:
-        chat = getattr(d, "chat", None)
-        name = (getattr(d, "name", None) or getattr(chat, "title", None)
-                or getattr(chat, "first_name", None) or str(getattr(chat, "id", "без названия")))
-        unread_count = getattr(d, "unread_count", getattr(d, "unread_messages", 0))
-        unread = f" [{unread_count}]" if unread_count else ""
-        lines.append(f"• {name}{unread}")
-    await c.message.answer("Последние диалоги:\n" + "\n".join(lines),
-                           reply_markup=app.kb([[("В панель", f"uacc_panel:{acc_id}")]]))
-
-
-@router.callback_query(F.data.startswith("uacc_join:"))
-async def join_start(c: CallbackQuery, state: FSMContext):
-    acc_id = int(c.data.split(":")[1])
-    if not await lease_guard(c, acc_id):
-        return
-    await state.set_state(LeaseFlow.join_link)
-    await state.update_data(acc_id=acc_id)
-    await app.edit_panel(c, "Пришлите ссылку-инвайт или @username канала.")
-    await c.answer()
-
-
-@router.message(LeaseFlow.join_link)
-async def join_do(m: Message, state: FSMContext):
-    data = await state.get_data()
-    acc_id = data["acc_id"]
-    link = (m.text or "").strip()
-    await state.clear()
-    try:
-        await app.lease_service.guard_lease(acc_id, m.from_user.id)
-        client = await app.client_pool_service.get(acc_id)
-        if hasattr(client, "join_chat"):
-            await client.join_chat(link)
-        else:
-            from telethon.tl.functions.channels import JoinChannelRequest
-            from telethon.tl.functions.messages import ImportChatInviteRequest
-            from urllib.parse import urlparse
-            parsed = urlparse(link)
-            invite_hash = parsed.path[2:] if parsed.path.startswith("/+") else (
-                parsed.path.rsplit("/", 1)[-1] if parsed.path.startswith("/joinchat/") else None
-            )
-            if invite_hash:
-                await client(ImportChatInviteRequest(invite_hash))
-            else:
-                entity = await client.get_entity(link)
-                await client(JoinChannelRequest(entity))
-    except (NotYourAccount, LeaseExpired) as exc:
-        return await m.answer(f"Не вступил: {exc}")
-    except Exception as exc:
-        return await m.answer(f"Не вступил: {exc}")
-    await m.answer("Заявка на вступление отправлена.", reply_markup=app.kb([[("В панель", f"uacc_panel:{acc_id}")]]))
-
-
 @router.callback_query(F.data.startswith("uacc_code:"))
 async def login_code(c: CallbackQuery):
     acc_id = int(c.data.split(":")[1])
     if app.LOGIN_MODE != "code_login":
-        return await c.answer("Выдача кода отключена: работайте через панель бота", show_alert=True)
+        return await c.answer("Выдача кода отключена: нужен ACCOUNT_LOGIN_MODE=code_login", show_alert=True)
     if not await lease_guard(c, acc_id):
         return
     acc = await app.db.one("SELECT * FROM accounts WHERE id=?", (acc_id,))
     if not acc or not acc["phone"]:
         return await c.answer("У аккаунта нет номера", show_alert=True)
-    await c.answer("Запрашиваю код…")
+    if acc["twofa_enc"] and not acc["twofa_shared"]:
+        return await c.answer("Пароль 2FA у администрации — попросите его у админа.", show_alert=True)
+    await c.answer("Проверяю сессию и запрашиваю код…")
     try:
         client = await app.client_pool_service.get(acc_id)
+        await client.get_me()
+    except Exception as exc:
+        await app.db.run("UPDATE accounts SET session_lost=1 WHERE id=?", (acc_id,))
+        await app.alert_session_lost(acc_id, c.from_user.id)
+        return await c.message.answer(f"Серверная сессия не отвечает ({exc}). Администрация увидит потерю, попробуйте позже.",
+                                      reply_markup=app.kb([[("В панель", f"uacc_panel:{acc_id}")]]))
+    try:
         if hasattr(client, "send_code_request"):
             await client.send_code_request(acc["phone"])
         else:
@@ -324,14 +226,38 @@ async def login_code(c: CallbackQuery):
     code = await wait_code(client)
     body = (f"Код входа для #{acc_id}: {code}" if code
             else "Код не пришёл за 25 секунд. Проверьте сервисные сообщения на аккаунте.")
-    if acc["twofa_shared"] and acc["twofa_enc"]:
+    if acc["twofa_enc"] and acc["twofa_shared"]:
         try:
             body += f"\nПароль 2FA: {decrypt(acc['twofa_enc'])}"
         except SessionCryptoError:
             body += "\nПароль 2FA сохранён, но не расшифровывается."
-    elif acc["twofa_enc"]:
-        body += "\nПароль 2FA у администрации."
+    body += "\n\nНе нажимайте «Завершить все другие сессии» — так аккаунт останется в складе."
     await c.message.answer(body, reply_markup=app.kb([[("В панель", f"uacc_panel:{acc_id}")]]))
+    asyncio.create_task(watch_after_login(acc_id, c.from_user.id))
+
+
+async def watch_after_login(acc_id, user_id):
+    """Три минуты после выдачи кода следим, что серверную сессию не скинули."""
+    for _ in range(4):
+        await asyncio.sleep(45)
+        try:
+            client = await app.client_pool_service.get(acc_id)
+            alive = bool(await client.get_me())
+        except Exception:
+            alive = False
+        if alive:
+            await app.db.run("UPDATE accounts SET session_lost=0,last_check_at=? WHERE id=?",
+                             (app.now(), acc_id))
+            continue
+        await app.db.run("UPDATE accounts SET session_lost=1 WHERE id=?", (acc_id,))
+        await app.client_pool_service.disconnect(acc_id)
+        await app.db.run("INSERT INTO account_events(account_id,user_id,action,detail,created_at) VALUES(?,?,?,?,?)",
+                         (acc_id, user_id, "session_lost", "сессия скинута после выдачи кода", app.now()))
+        try:
+            await app.alert_session_lost(acc_id, user_id)
+        except Exception:
+            log.exception("Не удалось уведомить о потере серверной сессии")
+        return
 
 
 async def wait_code(client):

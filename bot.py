@@ -52,6 +52,8 @@ lease_stop = None
 lease_task = None
 ACCOUNTS_READY = False
 LOGIN_MODE = os.getenv("ACCOUNT_LOGIN_MODE", "bot_only").strip().lower()
+ACCOUNT_LEASE_MIN = int(os.getenv("ACCOUNT_LEASE_MIN", os.getenv("ACCOUNT_LEASE_TTL_MIN", "1440")))
+ACCOUNT_LOCK_MIN = int(os.getenv("ACCOUNT_LOCK_MIN", "1440"))
 
 ROLES = ["Новичок", "Трафер", "Опытный", "Наставник"]
 
@@ -434,6 +436,25 @@ async def notify_admins(event: str, user_id: int, details: str = ""):
             await bot.send_message(admin_id, message, disable_web_page_preview=True)
         except Exception as exc:
             log.warning("Не удалось отправить лог администратору %s: %s", admin_id, exc)
+
+
+async def alert_session_lost(acc_id: int, user_id: int):
+    """Серверную сессию арендованного аккаунта скинули — сообщаем админам и арендатору."""
+    who = f"ID {user_id}" if user_id else "—"
+    for admin_id in await admin_ids():
+        try:
+            await bot.send_message(admin_id,
+                f"⚠️ Аккаунт #{acc_id}: серверная сессия потеряна.\nАрендатор: {who}\n"
+                "Откройте карточку аккаунта — сессию могли подменить.")
+        except Exception:
+            log.exception("Не удалось уведомить администратора о потере сессии")
+    if user_id:
+        try:
+            await bot.send_message(user_id,
+                f"⚠️ По аккаунту #{acc_id} пропала серверная сессия. "
+                "Если скидывали сессии в Telegram — войдите заново через «🔑 Код входа».")
+        except Exception:
+            log.exception("Не удалось уведомить арендатора о потере сессии")
 
 
 async def build_admin_keyboard():
@@ -1402,7 +1423,7 @@ async def on_startup(app: web.Application):
         ACCOUNTS_READY = False
         log.warning("Раздел аккаунтов отключён: %s", exc)
     client_pool_service = client_pool.configure(db)
-    lease_service = lease.configure(db, client_pool_service, int(os.getenv("ACCOUNT_LEASE_MIN", os.getenv("ACCOUNT_LEASE_TTL_MIN", "30"))))
+    lease_service = lease.configure(db, client_pool_service, ACCOUNT_LEASE_MIN, ACCOUNT_LOCK_MIN, alert_session_lost)
     code_login = CodeLoginManager(db, client_pool_service)
     await code_login.cleanup_expired()
     lease_stop = asyncio.Event()
@@ -1466,7 +1487,7 @@ async def run_polling_local():
         ACCOUNTS_READY = False
         log.warning("Раздел аккаунтов отключён: %s", exc)
     client_pool_service = client_pool.configure(db)
-    lease_service = lease.configure(db, client_pool_service, int(os.getenv("ACCOUNT_LEASE_MIN", os.getenv("ACCOUNT_LEASE_TTL_MIN", "30"))))
+    lease_service = lease.configure(db, client_pool_service, ACCOUNT_LEASE_MIN, ACCOUNT_LOCK_MIN, alert_session_lost)
     code_login = CodeLoginManager(db, client_pool_service)
     await code_login.cleanup_expired()
     lease_stop = asyncio.Event()

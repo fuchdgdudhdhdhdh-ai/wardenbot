@@ -30,10 +30,16 @@ class SessionImporter:
                    label=excluded.label,api_id=excluded.api_id,api_hash=excluded.api_hash,
                    session_enc=excluded.session_enc,phone=excluded.phone,tg_username=excluded.tg_username,
                    status='free',leased_by=NULL,lease_token=NULL,leased_at=NULL,lease_until=NULL,
+                   session_lost=0,check_failures=0,
                    added_by=excluded.added_by,client_type=excluded.client_type""",
             (label or f"Аккаунт {me.id}", int(api_id), api_hash, encrypt(session_string), phone,
              int(me.id), username, self.added_by, client_type, now()))
+        # Invalidate again after persisting the new session. The monitor can
+        # reconnect in the gap between the first disconnect and this UPSERT;
+        # without this second eviction, ClientPool may keep that stale client
+        # indefinitely because it only checks is_connected().
         row = await self.db.one("SELECT id FROM accounts WHERE tg_user_id=?", (int(me.id),))
+        await self.pool.disconnect(row["id"])
         await self.db.run(
             "INSERT INTO account_events(account_id,user_id,action,detail,created_at) VALUES(?,?,?,?,?)",
             (row["id"], self.added_by, action, f"Импортирован {client_type}; tg_user_id={me.id}", now()))

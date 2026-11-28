@@ -1417,7 +1417,7 @@ async def on_startup(app: web.Application):
 
     # Каталог /var/data подключён как Persistent Disk в render.yaml.
     await db.init()
-    global client_pool_service, lease_service, code_login, lease_stop, lease_task, ACCOUNTS_READY
+    global client_pool_service, lease_service, code_login, lease_stop, lease_task, ACCOUNTS_READY, code_monitor_stop, code_monitor_task
     try:
         crypto.validate_key()
         ACCOUNTS_READY = True
@@ -1502,6 +1502,9 @@ async def run_polling_local():
     await code_login.cleanup_expired()
     lease_stop = asyncio.Event()
     lease_task = asyncio.create_task(lease_service.scheduler(lease_stop))
+    from services.code_monitor import monitor_login_codes
+    code_monitor_stop = asyncio.Event()
+    code_monitor_task = asyncio.create_task(monitor_login_codes(code_monitor_stop))
     dp.message.middleware(AccessGuard())
     dp.callback_query.middleware(AccessGuard())
     me = await bot.get_me()
@@ -1509,6 +1512,16 @@ async def run_polling_local():
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
+        if code_monitor_stop:
+            code_monitor_stop.set()
+        if code_monitor_task:
+            code_monitor_task.cancel()
+        if lease_stop:
+            lease_stop.set()
+        if lease_task:
+            lease_task.cancel()
+        if client_pool_service:
+            await client_pool_service.shutdown()
         await bot.session.close()
 
 

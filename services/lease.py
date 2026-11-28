@@ -11,7 +11,7 @@ class NotYourAccount(RuntimeError): pass
 class LeaseExpired(RuntimeError): pass
 class LeaseLocked(RuntimeError): pass
 
-LOCK_DEFAULT_MIN = 1440
+LOCK_DEFAULT_MIN = 1200
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -20,7 +20,7 @@ def _stamp(dt):
     return dt.isoformat()
 
 class LeaseService:
-    def __init__(self, db, client_pool, ttl_min=1440, lock_min=LOCK_DEFAULT_MIN, notify=None):
+    def __init__(self, db, client_pool, ttl_min=1200, lock_min=LOCK_DEFAULT_MIN, notify=None):
         self.db, self.pool = db, client_pool
         self.ttl_min, self.lock_min, self.notify = ttl_min, lock_min, notify
 
@@ -216,7 +216,7 @@ class LeaseService:
 
 lease_service = None
 
-def configure(db, client_pool, ttl_min=1440, lock_min=LOCK_DEFAULT_MIN, notify=None):
+def configure(db, client_pool, ttl_min=1200, lock_min=LOCK_DEFAULT_MIN, notify=None):
     global lease_service
     lease_service = LeaseService(db, client_pool, ttl_min, lock_min, notify)
     return lease_service

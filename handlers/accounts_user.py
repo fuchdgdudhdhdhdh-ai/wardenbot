@@ -144,7 +144,6 @@ def panel_text(acc):
 
 def panel_kb(acc_id):
     return app.kb([
-        [("⏱ Продлить", f"uacc_ext:{acc_id}")],
         [("🚪 Освободить", f"uacc_rel:{acc_id}")],
         [("Назад ↩️", "free_accounts")],
     ])
@@ -166,19 +165,6 @@ async def panel(c: CallbackQuery, state: FSMContext):
         return
     await panel_edit(c, acc_id, c.from_user.id)
     await c.answer()
-
-
-@router.callback_query(F.data.startswith("uacc_ext:"))
-async def extend(c: CallbackQuery):
-    acc_id = int(c.data.split(":")[1])
-    if not await lease_guard(c, acc_id):
-        return
-    try:
-        await app.lease_service.renew(acc_id, c.from_user.id)
-    except LeaseExpired as exc:
-        return await c.answer(str(exc), show_alert=True)
-    await c.answer("Аренда продлена")
-    await panel_edit(c, acc_id, c.from_user.id)
 
 
 @router.callback_query(F.data.startswith("uacc_rel:"))

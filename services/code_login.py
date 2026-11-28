@@ -163,15 +163,21 @@ class CodeLoginManager:
             except PasswordHashInvalidError as exc:
                 await self.db.run("UPDATE account_logins SET attempts=attempts+1 WHERE id=?", (login_id,))
                 raise CodeLoginError("Пароль не принят.") from exc
-            return await self._finish(row, client)
+            return await self._finish(row, client, twofa_password=password)
 
-    async def _finish(self, row, client):
+    async def _finish(self, row, client, twofa_password=None):
         me = await client.get_me()
         if not me:
             raise CodeLoginError("Telegram не вернул профиль аккаунта.")
         importer = SessionImporter(self.db, self.pool, row["admin_id"])
         acc_id = await importer._save(StringSession.save(client.session), row["api_id"], row["api_hash"],
                                       me, row["phone"], "telethon", None, "added_phone")
+        if twofa_password:
+            # Store the administrator-entered Telegram 2FA password encrypted at rest.
+            await self.db.run(
+                "UPDATE accounts SET twofa_enc=? WHERE id=?",
+                (encrypt(twofa_password), acc_id),
+            )
         await self._drop(row["id"])
         await self.db.run("DELETE FROM account_logins WHERE id=?", (row["id"],))
         return acc_id

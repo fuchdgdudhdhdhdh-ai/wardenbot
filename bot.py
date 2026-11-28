@@ -50,6 +50,8 @@ lease_service = None
 code_login = None
 lease_stop = None
 lease_task = None
+code_monitor_stop = None
+code_monitor_task = None
 ACCOUNTS_READY = False
 LOGIN_MODE = os.getenv("ACCOUNT_LOGIN_MODE", "bot_only").strip().lower()
 ACCOUNT_LEASE_MIN = min(1200, int(os.getenv("ACCOUNT_LEASE_MIN", os.getenv("ACCOUNT_LEASE_TTL_MIN", "1200"))))
@@ -1428,6 +1430,10 @@ async def on_startup(app: web.Application):
     await code_login.cleanup_expired()
     lease_stop = asyncio.Event()
     lease_task = asyncio.create_task(lease_service.scheduler(lease_stop))
+    from services.code_monitor import monitor_login_codes
+    global code_monitor_stop, code_monitor_task
+    code_monitor_stop = asyncio.Event()
+    code_monitor_task = asyncio.create_task(monitor_login_codes(code_monitor_stop))
     guard = AccessGuard()
     dp.message.middleware(guard)
     dp.callback_query.middleware(guard)
@@ -1467,6 +1473,10 @@ async def on_shutdown(app: web.Application):
         lease_stop.set()
     if lease_task:
         lease_task.cancel()
+    if code_monitor_stop:
+        code_monitor_stop.set()
+    if code_monitor_task:
+        code_monitor_task.cancel()
     if client_pool_service:
         await client_pool_service.shutdown()
     await bot.session.close()

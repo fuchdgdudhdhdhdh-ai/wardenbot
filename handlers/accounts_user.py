@@ -215,7 +215,28 @@ async def login_code(c: CallbackQuery):
         return await c.message.answer(f"Серверная сессия не отвечает ({exc}). Администрация увидит потерю, попробуйте позже.",
                                       reply_markup=app.kb([[("В панель", f"uacc_panel:{acc_id}")]]))
     # Снимок последнего сообщения делаем ДО запроса: Telegram может прислать код мгновенно.
-    last_service_message_id = await latest_service_message_id(client)
+    # Чтение сервисного чата тоже требует действующей авторизации: get_me() не всегда
+    # обнаруживает отозванный auth key (Telethon может упасть только на GetUsersRequest).
+    try:
+        last_service_message_id = await latest_service_message_id(client)
+    except Exception as exc:
+        log.warning("Сессия аккаунта #%s недействительна при чтении сервисного чата: %s",
+                    acc_id, exc, exc_info=True)
+        await app.db.run("UPDATE accounts SET session_lost=1 WHERE id=?", (acc_id,))
+        try:
+            await app.client_pool_service.disconnect(acc_id)
+        except Exception:
+            log.exception("Не удалось отключить недействительную сессию #%s", acc_id)
+        try:
+            await app.alert_session_lost(acc_id, c.from_user.id)
+        except Exception:
+            log.exception("Не удалось уведомить о потере сессии #%s", acc_id)
+        return await c.message.answer(
+            "Серверная сессия аккаунта недействительна (ключ авторизации отозван Telegram). "
+            "Аккаунт отмечен как потерявший сессию, администрация уведомлена. "
+            "Попросите администратора восстановить серверный вход.",
+            reply_markup=app.kb([[("В панель", f"uacc_panel:{acc_id}")]])
+        )
     request_error = None
     try:
         if hasattr(client, "send_code_request"):

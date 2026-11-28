@@ -198,6 +198,8 @@ async def code_button(c: CallbackQuery, state: FSMContext):
         return await c.answer("Отправлено")
     data = await state.get_data()
     buf = data.get("buf", "")
+    if action in ("del", "d", "ok"):
+        await c.answer()
     if action == "del":
         await state.update_data(buf=buf[:-1])
         return await redraw(c, state)
@@ -210,7 +212,6 @@ async def code_button(c: CallbackQuery, state: FSMContext):
         return await redraw(c, state)
     if action == "ok":
         return await submit(c, state)
-    await c.answer()
 
 
 @router.message(AddFlow.password)
@@ -222,16 +223,19 @@ async def password_entered(m: Message, state: FSMContext):
     if not login_id:
         await state.clear()
         return await m.answer("Вход не найден. Начните заново.")
-    try:
-        acc_id = await app.code_login.submit_password(login_id, m.from_user.id, (m.text or "").strip())
-    except (CodeLoginError, LoginNotFound, NotYourLogin, LoginExpired) as exc:
-        return await m.answer(f"{exc}\n\nОтправьте пароль ещё раз или нажмите /cancel.")
-    await state.clear()
-    # Best-effort removal of the message containing the 2FA secret.
+    password = (m.text or "").strip()
+    # Сообщение с паролем 2FA удаляется независимо от результата.
     try:
         await m.delete()
     except Exception:
-        log.warning("Не удалось удалить сообщение с паролем 2FA при добавлении аккаунта #%s", acc_id)
+        log.warning("Не удалось удалить сообщение с паролем 2FA")
+    if not password:
+        return await m.answer("Отправьте пароль текстом или нажмите /cancel.")
+    try:
+        acc_id = await app.code_login.submit_password(login_id, m.from_user.id, password)
+    except (CodeLoginError, LoginNotFound, NotYourLogin, LoginExpired) as exc:
+        return await m.answer(f"{exc}\n\nОтправьте пароль ещё раз или нажмите /cancel.")
+    await state.clear()
     await app.db.audit(m.from_user.id, "account_added", acc_id, "phone+2fa")
     await m.answer(f"Аккаунт #{acc_id} залит. Пароль 2FA сохранён в зашифрованном виде.",
                    reply_markup=app.kb([[("Карточка", f"acc_ls:{acc_id}")], [("К складу", "acc_menu")]]))
@@ -302,6 +306,8 @@ async def card(acc_id):
             f"Тип клиента: {acc['client_type']}\nСессия на сервере: {'потеряна ⚠️' if acc['session_lost'] else 'ок'}\n"
             f"2FA в базе: {'да' if acc['twofa_enc'] else 'нет'}, "
             f"выдаётся: {'да' if acc['twofa_shared'] else 'нет'}{lease}")
+    if acc["note"]:
+        text += f"\nЗаметка: {acc['note'][:500]}"
     buttons = [
         [("🏷 Метка", f"acc_lbl:{acc_id}"), ("📝 Заметка", f"acc_note:{acc_id}")],
         [("🔑 2FA", f"acc_2fa:{acc_id}"), ("🔓 Показ 2FA", f"acc_share:{acc_id}")],
@@ -337,7 +343,7 @@ async def events(c: CallbackQuery):
         return await c.answer("Событий нет", show_alert=True)
     body = "\n".join(f"{r['created_at'][:16]} {r['action']} {r['user_id'] or ''} {r['detail'] or ''}".strip()
                      for r in rows)
-    await app.edit_panel(c, f"События аккаунта #{acc_id}:\n{body}",
+    await app.edit_panel(c, f"События аккаунта #{acc_id}:\n{body}"[:4000],
                          reply_markup=app.kb([[("Назад ↩️", f"acc_ls:{acc_id}")]]))
     await c.answer()
 
@@ -405,6 +411,10 @@ async def twofa_save(m: Message, state: FSMContext):
     acc_id = (await state.get_data())["acc_id"]
     await app.db.run("UPDATE accounts SET twofa_enc=? WHERE id=?", (encrypt(password[:100]), acc_id))
     await state.clear()
+    try:
+        await m.delete()
+    except Exception:
+        log.warning("Не удалось удалить сообщение с паролем 2FA аккаунта #%s", acc_id)
     await m.answer("Пароль 2FA сохранён в зашифрованном виде.",
                    reply_markup=app.kb([[("Карточка", f"acc_ls:{acc_id}")]]))
 
@@ -451,13 +461,16 @@ async def check(c: CallbackQuery):
     acc = await app.db.one("SELECT * FROM accounts WHERE id=?", (acc_id,))
     if not acc:
         return await c.answer("Аккаунт не найден", show_alert=True)
+    if acc["status"] == "disabled":
+        return await c.answer("Аккаунт отключён. Сначала включите его.", show_alert=True)
     await c.answer("Проверяю…")
     try:
         client = await app.client_pool_service.get(acc_id)
         me = await client.get_me()
         if not me:
             raise RuntimeError("Telegram не вернул профиль")
-        await app.db.run("UPDATE accounts SET last_check_at=?,check_failures=0,tg_username=?,session_lost=0 WHERE id=?",
+        await app.db.run("UPDATE accounts SET last_check_at=?,check_failures=0,tg_username=?,session_lost=0,"
+                         "status=CASE WHEN status='dead' THEN 'free' ELSE status END WHERE id=?",
                          (app.now(), getattr(me, "username", None), acc_id))
         await app.db.run("INSERT INTO account_events(account_id,user_id,action,created_at) VALUES(?,?,?,?)",
                          (acc_id, c.from_user.id, "check_ok", app.now()))

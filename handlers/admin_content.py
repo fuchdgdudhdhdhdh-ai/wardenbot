@@ -82,7 +82,7 @@ async def content_news(c: CallbackQuery):
     if not await _admin_only(c):
         return
     rows = await app.db.all(
-        "SELECT id,title,created_at FROM news ORDER BY id DESC LIMIT 30"
+        "SELECT id,title,created_at FROM news ORDER BY id DESC LIMIT 90"
     )
     buttons = [
         [(f"#{row['id']} · {row['title'][:42]}", f"content_news_del:{row['id']}")]
@@ -149,7 +149,7 @@ async def content_offers(c: CallbackQuery):
     if not await _admin_only(c):
         return
     rows = await app.db.all(
-        "SELECT id,title,active FROM offers ORDER BY id DESC LIMIT 30"
+        "SELECT id,title,active FROM offers WHERE active=1 ORDER BY id DESC LIMIT 90"
     )
     buttons = [
         [(
@@ -185,8 +185,8 @@ async def content_offer_delete_ask(c: CallbackQuery):
     await app.edit_panel(
         c,
         f"Удалить оффер #{offer_id} «{row['title']}»?\n"
-        f"Будут также удалены его ссылки: {links['n']}. "
-        "Текущие ссылки участников будут сброшены.",
+        f"Ссылок в оффере: {links['n']}. Свободные будут удалены, выданные отключены. "
+        "Текущие ссылки участников будут сброшены, заработок сохранится.",
         reply_markup=app.kb([
             [("Да, удалить оффер", f"content_offer_ok:{offer_id}")],
             [("Отмена ↩️", "content_offers")],
@@ -216,8 +216,16 @@ async def content_offer_delete(c: CallbackQuery):
             "WHERE current_offer_id=?",
             (offer_id,),
         )
-        await conn.execute("DELETE FROM links WHERE offer_id=?", (offer_id,))
-        await conn.execute("DELETE FROM offers WHERE id=?", (offer_id,))
+        # Выданные ссылки и оффер остаются скрытыми: по ним считается заработок участников.
+        await conn.execute(
+            "DELETE FROM links WHERE offer_id=? AND assigned_user IS NULL", (offer_id,)
+        )
+        await conn.execute("UPDATE links SET active=0 WHERE offer_id=?", (offer_id,))
+        cur = await conn.execute("SELECT COUNT(*) n FROM links WHERE offer_id=?", (offer_id,))
+        if (await cur.fetchone())["n"]:
+            await conn.execute("UPDATE offers SET active=0 WHERE id=?", (offer_id,))
+        else:
+            await conn.execute("DELETE FROM offers WHERE id=?", (offer_id,))
         return dict(offer)
 
     offer = await app.db.transaction(op)
@@ -226,7 +234,7 @@ async def content_offer_delete(c: CallbackQuery):
     await app.db.audit(c.from_user.id, "offer_deleted", offer_id, offer["title"])
     await app.edit_panel(
         c,
-        f"Оффер #{offer_id} удалён вместе со ссылками.",
+        f"Оффер #{offer_id} удалён.",
         reply_markup=app.kb([
             [("К офферам", "content_offers")],
             [("В админ-панель", "admin_home")],

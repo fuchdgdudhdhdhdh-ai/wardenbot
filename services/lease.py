@@ -58,9 +58,12 @@ class LeaseService:
             if await cur.fetchone() is not None:
                 return "limit", None
             cur = await conn.execute(
-                """UPDATE accounts SET status='leased',leased_by=?,lease_token=?,leased_at=?,lease_until=?
-                   WHERE id=? RETURNING id""",
-                (user_id, token, _stamp(now), _stamp(until), acc_id))
+                """UPDATE accounts SET status='leased',leased_by=?,lease_token=?,leased_at=?,lease_until=?,
+                   session_lost=0,check_failures=0
+                   WHERE id=? AND available_for_issue=1
+                   AND (status='free' OR (status='leased' AND (lease_until IS NULL OR lease_until<=?)))
+                   RETURNING id""",
+                (user_id, token, _stamp(now), _stamp(until), acc_id, _stamp(now)))
             if await cur.fetchone() is None:
                 return "busy", None
             return "ok", token
@@ -114,7 +117,7 @@ class LeaseService:
         left = self.lock_left(row["leased_at"])
         if left:
             until = datetime.fromisoformat(row["leased_at"]) + timedelta(minutes=self.lock_min)
-            raise LeaseLocked(f"Аккаунт закреплён за вами до {until:%d.%m %H:%M}. "
+            raise LeaseLocked(f"Аккаунт закреплён за вами до {until:%d.%m %H:%M} UTC. "
                               f"Освободить можно через {ceil(left / 60)} ч.")
         async def op(conn):
             cur = await conn.execute(
@@ -131,7 +134,7 @@ class LeaseService:
         async def op(conn):
             cur = await conn.execute(
                 """UPDATE accounts SET status='free',leased_by=NULL,lease_token=NULL,
-                   leased_at=NULL,lease_until=NULL WHERE id=? AND status='leased' RETURNING id""",
+                   leased_at=NULL,lease_until=NULL,session_lost=0 WHERE id=? AND status='leased' RETURNING id""",
                 (acc_id,))
             return await cur.fetchone()
         if await self.db.transaction(op) is None:
@@ -162,7 +165,7 @@ class LeaseService:
             expired = [row["id"] for row in await cur.fetchall()]
             await conn.execute(
                 """UPDATE accounts SET status='free',leased_by=NULL,lease_token=NULL,
-                   leased_at=NULL,lease_until=NULL WHERE status='leased'
+                   leased_at=NULL,lease_until=NULL,session_lost=0 WHERE status='leased'
                    AND (lease_until IS NULL OR lease_until<=?)""", (now,))
             return expired
         expired_ids = await self.db.transaction(op)

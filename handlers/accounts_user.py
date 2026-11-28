@@ -125,7 +125,7 @@ def panel_text(acc):
             f"Осталось аренды: {remaining(acc['lease_until'])}\n")
     if left:
         until = datetime.fromisoformat(acc["leased_at"]) + timedelta(minutes=app.lease_service.lock_min)
-        text += f"🔒 Закреплён за вами до {until:%d.%m %H:%M} (ещё {ceil(left / 60)} ч.), скинуть нельзя\n"
+        text += f"🔒 Закреплён за вами до {until:%d.%m %H:%M} UTC (ещё {ceil(left / 60)} ч.), скинуть нельзя\n"
     else:
         text += "🔓 Закрепление истекло — аккаунт можно освободить\n"
     if acc.get("twofa_shared") and acc.get("twofa_enc"):
@@ -137,8 +137,6 @@ def panel_text(acc):
         except SessionCryptoError:
             text += "\n\n⚠️ 2FA включена, но пароль сейчас недоступен. Обратитесь к администратору."
     text += "\n\nКоды входа от Telegram будут автоматически отправляться сюда в личные сообщения."
-    if acc["note"]:
-        text += f"\n\nЗаметка: {acc['note'][:300]}"
     return text
 
 

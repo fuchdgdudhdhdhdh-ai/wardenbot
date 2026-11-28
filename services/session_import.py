@@ -30,6 +30,7 @@ class SessionImporter:
                    label=excluded.label,api_id=excluded.api_id,api_hash=excluded.api_hash,
                    session_enc=excluded.session_enc,phone=excluded.phone,tg_username=excluded.tg_username,
                    status='free',leased_by=NULL,lease_token=NULL,leased_at=NULL,lease_until=NULL,
+                   session_lost=0,check_failures=0,
                    added_by=excluded.added_by,client_type=excluded.client_type""",
             (label or f"Аккаунт {me.id}", int(api_id), api_hash, encrypt(session_string), phone,
              int(me.id), username, self.added_by, client_type, now()))
@@ -56,7 +57,7 @@ class SessionImporter:
         raise SessionImportError("Неизвестный формат .session. Ожидался файл Telethon или Pyrogram.")
 
     async def _import_telethon_file(self, path, label):
-        api_id = int(os.getenv("API_ID", "0")); api_hash = os.getenv("API_HASH", "")
+        api_id = int(os.getenv("API_ID") or 0); api_hash = os.getenv("API_HASH", "")
         if not api_id or not api_hash:
             raise SessionImportError("Для импорта Telethon задайте API_ID и API_HASH в .env.")
         client = TelegramClient(str(path), api_id, api_hash)
@@ -88,7 +89,7 @@ class SessionImporter:
             if not me:
                 raise SessionImportError("Сессия Pyrogram не авторизована.")
             session = await client.export_session_string()
-            api_id = client.api_id
+            api_id = client.api_id or await client.storage.api_id()
             return await self._save(session, api_id, api_hash, me, getattr(me, "phone_number", None), "pyrogram", label)
         except asyncio.TimeoutError as exc:
             raise SessionImportError("Истекло время подключения к Telegram.") from exc
@@ -103,7 +104,7 @@ class SessionImporter:
             data = json.loads(path.read_text("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise SessionImportError("Не удалось прочитать JSON.") from exc
-        api_id = int(data.get("api_id") or os.getenv("API_ID", "0"))
+        api_id = int(data.get("api_id") or os.getenv("API_ID") or 0)
         api_hash = data.get("api_hash") or os.getenv("API_HASH", "")
         session = data.get("session_string")
         if session:
